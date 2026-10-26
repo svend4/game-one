@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class GameDatabase private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "tetricross_database", null, 3) {
+    SQLiteOpenHelper(context.applicationContext, "tetricross_database", null, 4) {
 
     private val scoresFlow = MutableStateFlow<List<HighScoreEntity>>(emptyList())
 
@@ -69,6 +69,90 @@ class GameDatabase private constructor(context: Context) :
             val db = writableDatabase
             db.delete("saved_game", "id = 1", null)
         }
+
+        override suspend fun getCustomFamilyWords(): List<CustomFamilyWordEntity> {
+            val list = mutableListOf<CustomFamilyWordEntity>()
+            try {
+                val db = readableDatabase
+                val cursor = db.query(
+                    "custom_family_words",
+                    arrayOf("word", "clue", "funFact", "isRussian"),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                )
+                cursor.use {
+                    while (it.moveToNext()) {
+                        list.add(
+                            CustomFamilyWordEntity(
+                                word = it.getString(0) ?: "",
+                                clue = it.getString(1) ?: "",
+                                funFact = it.getString(2) ?: "",
+                                isRussian = it.getInt(3) != 0
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            return list
+        }
+
+        override suspend fun insertCustomFamilyWord(entity: CustomFamilyWordEntity) {
+            try {
+                val db = writableDatabase
+                val values = ContentValues().apply {
+                    put("word", entity.word)
+                    put("clue", entity.clue)
+                    put("funFact", entity.funFact)
+                    put("isRussian", if (entity.isRussian) 1 else 0)
+                }
+                db.insertWithOnConflict("custom_family_words", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        override suspend fun getUnlockedWords(): Set<String> {
+            val set = mutableSetOf<String>()
+            try {
+                val db = readableDatabase
+                val cursor = db.query(
+                    "unlocked_words",
+                    arrayOf("word"),
+                    null,
+                    null,
+                    null,
+                    null,
+                    "unlockedAt DESC"
+                )
+                cursor.use {
+                    while (it.moveToNext()) {
+                        val w = it.getString(0)
+                        if (!w.isNullOrBlank()) set.add(w)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            return set
+        }
+
+        override suspend fun insertUnlockedWord(word: String) {
+            try {
+                val db = writableDatabase
+                val values = ContentValues().apply {
+                    put("word", word.uppercase().trim())
+                    put("unlockedAt", System.currentTimeMillis())
+                }
+                db.insertWithOnConflict("unlocked_words", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     init {
@@ -92,6 +176,24 @@ class GameDatabase private constructor(context: Context) :
                 id INTEGER PRIMARY KEY NOT NULL,
                 gameJson TEXT NOT NULL,
                 lastSaved INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS custom_family_words (
+                word TEXT PRIMARY KEY NOT NULL,
+                clue TEXT NOT NULL,
+                funFact TEXT NOT NULL,
+                isRussian INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS unlocked_words (
+                word TEXT PRIMARY KEY NOT NULL,
+                unlockedAt INTEGER NOT NULL
             )
             """.trimIndent()
         )

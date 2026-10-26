@@ -24,8 +24,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.game.Dictionary
 import com.example.game.GameViewModel
 import com.example.game.PaceMode
 import com.example.game.WordTheme
@@ -38,6 +40,17 @@ fun MenuScreen(
 ) {
     var showHowToPlay by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+
+    val isPaper = viewModel.isPaperTheme
+    val screenBg = if (isPaper) Color(0xFFFBF7EE) else Color(0xFF1C1B1F)
+    val cardBg = if (isPaper) Color(0xFFFFFDF9) else Color(0xFF2B2930)
+    val borderCol = if (isPaper) Color(0xFFD7CCC8) else Color(0xFF49454F)
+    val textPrimary = if (isPaper) Color(0xFF2C1E14) else Color(0xFFE6E1E5)
+    val textSecondary = if (isPaper) Color(0xFF5D4037) else Color(0xFFCAC4D0)
+    val accentPrimary = if (isPaper) Color(0xFF1B365D) else Color(0xFFD0BCFF)
+    val accentGold = if (isPaper) Color(0xFFB45309) else Color(0xFFFFD54F)
+
+    val dailyWord = remember(viewModel.isRussian) { Dictionary.getDailyWord(viewModel.isRussian) }
 
     // Pulsing animation for the title
     val infiniteTransition = rememberInfiniteTransition(label = "title_pulse")
@@ -54,28 +67,28 @@ fun MenuScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF1C1B1F))
+            .background(screenBg)
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 18.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
                 .widthIn(max = 520.dp)
                 .verticalScroll(scrollState)
-                .padding(vertical = 8.dp)
+                .padding(vertical = 6.dp)
         ) {
             // Game Logo Block
             Box(
                 modifier = Modifier
                     .scale(scaleFactor)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
-                    .border(1.5.dp, Color(0xFFFFD54F).copy(alpha = 0.6f), RoundedCornerShape(24.dp))
-                    .background(Color(0xFF2B2930))
-                    .padding(horizontal = 24.dp, vertical = 18.dp),
+                    .clip(RoundedCornerShape(22.dp))
+                    .border(1.5.dp, accentGold.copy(alpha = 0.65f), RoundedCornerShape(22.dp))
+                    .background(cardBg)
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -84,7 +97,7 @@ fun MenuScreen(
                         style = MaterialTheme.typography.headlineLarge.copy(
                             fontWeight = FontWeight.Black,
                             letterSpacing = 3.sp,
-                            color = Color(0xFFD0BCFF)
+                            color = accentPrimary
                         )
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -95,9 +108,9 @@ fun MenuScreen(
                             "1. CROSSWORD  →  2. PUZZLE  →  3. TETRIS LINE"
                         },
                         style = MaterialTheme.typography.labelMedium.copy(
-                            color = Color(0xFFFFD54F),
+                            color = accentGold,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                            letterSpacing = 0.8.sp
                         ),
                         textAlign = TextAlign.Center
                     )
@@ -109,20 +122,20 @@ fun MenuScreen(
                 onClick = onNavigateToGame,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp)
+                    .height(54.dp)
                     .testTag("play_button"),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFD0BCFF),
-                    contentColor = Color(0xFF381E72)
+                    containerColor = accentPrimary,
+                    contentColor = if (isPaper) Color.White else Color(0xFF381E72)
                 ),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.PlayArrow,
                     contentDescription = "Play",
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(26.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = if (viewModel.isRussian) "НАЧАТЬ ИГРУ" else "START GAME",
                     style = MaterialTheme.typography.titleMedium.copy(
@@ -132,12 +145,114 @@ fun MenuScreen(
                 )
             }
 
+            // --- ☀️ DAILY WORD OF THE DAY & FAMILY ALBUM / CREATOR ROW ---
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.5.dp, accentGold.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                    .clickable { viewModel.showDailyWordModal = true }
+                    .testTag("daily_word_card"),
+                colors = CardDefaults.cardColors(containerColor = cardBg),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (viewModel.isRussian) {
+                                "☀️ Слово Дня (${dailyWord.word.length} букв)"
+                            } else {
+                                "☀️ Word of the Day (${dailyWord.word.length} letters)"
+                            },
+                            color = accentGold,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
+                        )
+
+                        Text(
+                            text = if (viewModel.dailyWordCompletedToday) {
+                                if (viewModel.isRussian) "✅ Разгадано!" else "✅ Solved!"
+                            } else {
+                                if (viewModel.isRussian) "🎁 +500 очков" else "🎁 +500 pts"
+                            },
+                            color = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    Text(
+                        text = dailyWord.definition,
+                        color = textPrimary,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    // Family Encyclopedia Album & Custom Riddle Creator Buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = { viewModel.showEncyclopediaModal = true },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = accentGold.copy(alpha = 0.16f),
+                                contentColor = accentGold
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .testTag("menu_encyclopedia_button")
+                        ) {
+                            Text(
+                                text = if (viewModel.isRussian) {
+                                    "📖 Альбом слов (${viewModel.unlockedWordsSet.size})"
+                                } else {
+                                    "📖 Word Album (${viewModel.unlockedWordsSet.size})"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        FilledTonalButton(
+                            onClick = { viewModel.showCustomWordCreatorModal = true },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0xFF00C853).copy(alpha = 0.16f),
+                                contentColor = if (isPaper) Color(0xFF1B5E20) else Color(0xFF00E676)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .testTag("menu_custom_word_button")
+                        ) {
+                            Text(
+                                text = if (viewModel.isRussian) "✍️ Своя загадка" else "✍️ Custom Riddle",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             // --- FAMILY PACE SELECTOR (3 Modes) ---
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF49454F), RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2930)),
+                    .border(1.dp, borderCol, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = cardBg),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Column(
@@ -150,7 +265,7 @@ fun MenuScreen(
                         } else {
                             "⏱ Choose your comfortable pace:"
                         },
-                        color = Color(0xFFE6E1E5),
+                        color = textPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
@@ -163,7 +278,8 @@ fun MenuScreen(
                             title = if (viewModel.isRussian) "🌿 Пазл" else "🌿 Puzzle",
                             subtitle = if (viewModel.isRussian) "Без таймера" else "No timer",
                             selected = viewModel.paceMode == PaceMode.PUZZLE_STEP,
-                            activeColor = Color(0xFF81C784),
+                            activeColor = if (isPaper) Color(0xFF2E7D32) else Color(0xFF81C784),
+                            isPaper = isPaper,
                             onClick = { viewModel.updatePaceMode(PaceMode.PUZZLE_STEP) },
                             modifier = Modifier
                                 .weight(1f)
@@ -173,7 +289,8 @@ fun MenuScreen(
                             title = if (viewModel.isRussian) "🐢 Медленно" else "🐢 Slow",
                             subtitle = if (viewModel.isRussian) "Плавный бриз" else "Calm breeze",
                             selected = viewModel.paceMode == PaceMode.RELAXED,
-                            activeColor = Color(0xFF64B5F6),
+                            activeColor = if (isPaper) Color(0xFF1565C0) else Color(0xFF64B5F6),
+                            isPaper = isPaper,
                             onClick = { viewModel.updatePaceMode(PaceMode.RELAXED) },
                             modifier = Modifier
                                 .weight(1f)
@@ -183,7 +300,8 @@ fun MenuScreen(
                             title = if (viewModel.isRussian) "⚡ Аркада" else "⚡ Arcade",
                             subtitle = if (viewModel.isRussian) "На скорость" else "Dynamic",
                             selected = viewModel.paceMode == PaceMode.ARCADE,
-                            activeColor = Color(0xFFD0BCFF),
+                            activeColor = accentPrimary,
+                            isPaper = isPaper,
                             onClick = { viewModel.updatePaceMode(PaceMode.ARCADE) },
                             modifier = Modifier
                                 .weight(1f)
@@ -197,8 +315,8 @@ fun MenuScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF49454F), RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2930)),
+                    .border(1.dp, borderCol, RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = cardBg),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Column(
@@ -211,7 +329,7 @@ fun MenuScreen(
                         } else {
                             "📚 Crossword Theme & Family Comfort:"
                         },
-                        color = Color(0xFFE6E1E5),
+                        color = textPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
@@ -224,12 +342,14 @@ fun MenuScreen(
                         ThemeOptionChip(
                             label = if (viewModel.isRussian) "📚 Все темы" else "📚 All Themes",
                             selected = viewModel.selectedTheme == WordTheme.ALL,
+                            isPaper = isPaper,
                             onClick = { viewModel.selectTheme(WordTheme.ALL) },
                             modifier = Modifier.weight(1f)
                         )
                         ThemeOptionChip(
                             label = if (viewModel.isRussian) "🏡 Дом и Кухня" else "🏡 Home & Food",
                             selected = viewModel.selectedTheme == WordTheme.HOME_COOKING,
+                            isPaper = isPaper,
                             onClick = { viewModel.selectTheme(WordTheme.HOME_COOKING) },
                             modifier = Modifier.weight(1f)
                         )
@@ -242,37 +362,39 @@ fun MenuScreen(
                         ThemeOptionChip(
                             label = if (viewModel.isRussian) "🌿 Природа" else "🌿 Nature",
                             selected = viewModel.selectedTheme == WordTheme.NATURE_ANIMALS,
+                            isPaper = isPaper,
                             onClick = { viewModel.selectTheme(WordTheme.NATURE_ANIMALS) },
                             modifier = Modifier.weight(1f)
                         )
                         ThemeOptionChip(
                             label = if (viewModel.isRussian) "🧚 Сказки и Дети" else "🧚 Fairy Tales",
                             selected = viewModel.selectedTheme == WordTheme.FAIRY_TALES_KIDS,
+                            isPaper = isPaper,
                             onClick = { viewModel.selectTheme(WordTheme.FAIRY_TALES_KIDS) },
                             modifier = Modifier.weight(1f)
                         )
                     }
 
-                    // Kids 1-Tile Mode & Senior Large Font Mode Toggles
+                    // Row 1 of Toggles: 1-Tile vs 4-Block & Crossed 2-Word Stencil ("✚ 2 Слова")
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         FilledTonalButton(
                             onClick = { viewModel.toggleSingleTileMode() },
                             colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = if (viewModel.isSingleTileMode) Color(0xFF00E676).copy(alpha = 0.2f) else Color(0xFF1C1B1F),
-                                contentColor = if (viewModel.isSingleTileMode) Color(0xFF00E676) else Color(0xFFCAC4D0)
+                                containerColor = if (viewModel.isSingleTileMode) Color(0xFF00C853).copy(alpha = 0.2f) else screenBg,
+                                contentColor = if (viewModel.isSingleTileMode) (if (isPaper) Color(0xFF1B5E20) else Color(0xFF00E676)) else textSecondary
                             ),
                             border = BorderStroke(
                                 1.dp,
-                                if (viewModel.isSingleTileMode) Color(0xFF00E676) else Color(0xFF49454F)
+                                if (viewModel.isSingleTileMode) Color(0xFF00C853) else borderCol
                             ),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(42.dp)
+                                .height(38.dp)
                                 .testTag("menu_single_tile_toggle")
                         ) {
                             Text(
@@ -287,20 +409,82 @@ fun MenuScreen(
                         }
 
                         FilledTonalButton(
-                            onClick = { viewModel.toggleLargeFontMode() },
+                            onClick = { viewModel.toggleCrossedStencilMode() },
                             colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = if (viewModel.isLargeFontMode) Color(0xFFFFD54F).copy(alpha = 0.2f) else Color(0xFF1C1B1F),
-                                contentColor = if (viewModel.isLargeFontMode) Color(0xFFFFD54F) else Color(0xFFCAC4D0)
+                                containerColor = if (viewModel.isCrossedStencilMode) accentPrimary.copy(alpha = 0.2f) else screenBg,
+                                contentColor = if (viewModel.isCrossedStencilMode) accentPrimary else textSecondary
                             ),
                             border = BorderStroke(
                                 1.dp,
-                                if (viewModel.isLargeFontMode) Color(0xFFFFD54F) else Color(0xFF49454F)
+                                if (viewModel.isCrossedStencilMode) accentPrimary else borderCol
                             ),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(42.dp)
+                                .height(38.dp)
+                                .testTag("menu_crossed_stencil_toggle")
+                        ) {
+                            Text(
+                                text = if (viewModel.isCrossedStencilMode) {
+                                    if (viewModel.isRussian) "✚ 2 Слова (Крест)" else "✚ 2-Word Cross"
+                                } else {
+                                    if (viewModel.isRussian) "➖ 1 Слово в ряд" else "➖ 1-Word Line"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    // Row 2 of Toggles: Paper Magazine Theme ("📰 Бумага") & Large Font ("👓 Крупно")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = { viewModel.togglePaperTheme() },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = if (viewModel.isPaperTheme) accentGold.copy(alpha = 0.2f) else screenBg,
+                                contentColor = if (viewModel.isPaperTheme) accentGold else textSecondary
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                if (viewModel.isPaperTheme) accentGold else borderCol
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .testTag("menu_paper_theme_toggle")
+                        ) {
+                            Text(
+                                text = if (viewModel.isPaperTheme) {
+                                    if (viewModel.isRussian) "📰 Бумажная тема" else "📰 Paper Theme"
+                                } else {
+                                    if (viewModel.isRussian) "🌙 Вечерняя тема" else "🌙 Night Theme"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        FilledTonalButton(
+                            onClick = { viewModel.toggleLargeFontMode() },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = if (viewModel.isLargeFontMode) accentGold.copy(alpha = 0.2f) else screenBg,
+                                contentColor = if (viewModel.isLargeFontMode) accentGold else textSecondary
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                if (viewModel.isLargeFontMode) accentGold else borderCol
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
                                 .testTag("menu_large_font_toggle")
                         ) {
                             Text(
@@ -322,8 +506,8 @@ fun MenuScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF2B2930))
-                    .border(1.dp, Color(0xFF49454F), RoundedCornerShape(14.dp))
+                    .background(cardBg)
+                    .border(1.dp, borderCol, RoundedCornerShape(14.dp))
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
@@ -331,14 +515,14 @@ fun MenuScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (viewModel.isRussian) Color(0xFFD0BCFF) else Color.Transparent)
+                        .background(if (viewModel.isRussian) accentPrimary else Color.Transparent)
                         .clickable { if (!viewModel.isRussian) viewModel.toggleLanguage() }
-                        .padding(vertical = 10.dp),
+                        .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "РУССКИЙ",
-                        color = if (viewModel.isRussian) Color(0xFF381E72) else Color(0xFFCAC4D0),
+                        color = if (viewModel.isRussian) (if (isPaper) Color.White else Color(0xFF381E72)) else textSecondary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -347,14 +531,14 @@ fun MenuScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (!viewModel.isRussian) Color(0xFFD0BCFF) else Color.Transparent)
+                        .background(if (!viewModel.isRussian) accentPrimary else Color.Transparent)
                         .clickable { if (viewModel.isRussian) viewModel.toggleLanguage() }
-                        .padding(vertical = 10.dp),
+                        .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "ENGLISH",
-                        color = if (!viewModel.isRussian) Color(0xFF381E72) else Color(0xFFCAC4D0),
+                        color = if (!viewModel.isRussian) (if (isPaper) Color.White else Color(0xFF381E72)) else textSecondary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -370,12 +554,12 @@ fun MenuScreen(
                     onClick = onNavigateToLeaderboard,
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(46.dp)
                         .testTag("leaderboard_button"),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFFD0BCFF)
+                        contentColor = accentPrimary
                     ),
-                    border = BorderStroke(1.dp, Color(0xFF49454F)),
+                    border = BorderStroke(1.dp, borderCol),
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(
@@ -395,13 +579,13 @@ fun MenuScreen(
                     onClick = { showHowToPlay = !showHowToPlay },
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(46.dp)
                         .testTag("instructions_button"),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF2B2930),
-                        contentColor = Color(0xFFE6E1E5)
+                        containerColor = cardBg,
+                        contentColor = textPrimary
                     ),
-                    border = BorderStroke(1.dp, Color(0xFF49454F)),
+                    border = BorderStroke(1.dp, borderCol),
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(
@@ -423,10 +607,8 @@ fun MenuScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, Color(0xFF49454F), RoundedCornerShape(16.dp)),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF2B2930)
-                    ),
+                        .border(1.dp, borderCol, RoundedCornerShape(16.dp)),
+                    colors = CardDefaults.cardColors(containerColor = cardBg),
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(
@@ -434,32 +616,59 @@ fun MenuScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = if (viewModel.isRussian) "Семейные правила (Кроссворд → Пазл → Тетрис):" else "Family Rules (Crossword → Puzzle → Tetris):",
+                            text = if (viewModel.isRussian) "Семейные правила и новые возможности:" else "Family Rules & New Features:",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFFD54F)
+                                color = accentGold
                             )
                         )
                         Text(
                             text = if (viewModel.isRussian) {
-                                "1. 🧩 Медленный Кроссворд: прочитайте загадку сверху. В центре поля уже выложены опорные буквы слова, а пустая клетка светится золотым!\n" +
-                                "2. 🌿 Складывание Пазла: в режиме «Пазл без таймера» фигуры не падают сами. Спокойно наведите нужную букву на золотую ячейку (или включите «🧒 1-Плитку» для одной простой буквы).\n" +
-                                "3. 🧲 Кнопка «Магнит»: в любой момент нажмите «Магнит», чтобы буква сама встала в кроссворд!\n" +
-                                "4. ✨ Исчезновение как в Тетрисе: когда слово собрано, вся горизонтальная линия эффектно исчезает, принося +250 очков и новую загадку!"
+                                "1. 🧩 Медленный Кроссворд + 🔊 Озвучка: нажмите «🔊», чтобы прослушать загадку голосом. На поле выложен трафарет слова (или «✚ 2 Слова» крест-накрест) с золотой ячейкой для недостающей буквы.\n" +
+                                "2. 🌿 Пазл и ↩️ Отмена хода: спокойно направьте букву в золотую ячейку, нажмите «🧲 Магнит» для автоподстановки или «↩️ Шаг назад», если случайно ошиблись.\n" +
+                                "3. 🎉 Праздничный салют и 📖 Альбом: каждое собранное слово запускает салют частиц, очищает линию и открывает познавательный факт в Семейном Альбоме!\n" +
+                                "4. ✍️ Своя загадка: загадайте близким собственное семейное слово в конструкторе!"
                             } else {
-                                "1. 🧩 Slow Crossword: Read the riddle at the top. Anchor letters are already placed on the board with a glowing golden slot for the missing letter!\n" +
-                                "2. 🌿 Puzzle Folding: In 'Puzzle' mode pieces never fall on their own. Align the needed letter over the golden slot (or toggle '🧒 1-Tile' for single-letter tiles).\n" +
-                                "3. 🧲 Magnet Helper: Tap 'Magnet' anytime to automatically place the missing letter into the crossword slot!\n" +
-                                "4. ✨ Tetris Line Vanish: Completing the word clears the entire horizontal row like Tetris (+250 pts)!"
+                                "1. 🧩 Slow Crossword + 🔊 Voice: Tap '🔊' to hear the riddle spoken aloud. The board holds a word stencil (or '✚ 2-Word Cross') with a glowing golden slot.\n" +
+                                "2. 🌿 Puzzle & ↩️ Undo: Calmly drop the matching letter into the golden slot, tap '🧲 Magnet', or tap '↩️ Undo' to step back.\n" +
+                                "3. 🎉 Confetti & 📖 Word Album: Completing a word triggers confetti fireworks, clears the line, and unlocks a fun fact in the Family Word Album!\n" +
+                                "4. ✍️ Custom Riddle: Create your own family words for loved ones!"
                             },
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = Color(0xFFE6E1E5),
+                                color = textPrimary,
                                 lineHeight = 20.sp
                             )
                         )
                     }
                 }
             }
+        }
+
+        // Modals accessible right from MenuScreen
+        if (viewModel.showEncyclopediaModal) {
+            FamilyWordEncyclopediaDialog(
+                viewModel = viewModel,
+                onDismiss = { viewModel.showEncyclopediaModal = false }
+            )
+        }
+
+        if (viewModel.showCustomWordCreatorModal) {
+            CustomFamilyRiddleCreatorDialog(
+                viewModel = viewModel,
+                onNavigateToGame = onNavigateToGame,
+                onDismiss = { viewModel.showCustomWordCreatorModal = false }
+            )
+        }
+
+        if (viewModel.showDailyWordModal) {
+            DailyWordOfTheDayDialog(
+                viewModel = viewModel,
+                onStartDailyWord = {
+                    viewModel.startDailyWordChallenge()
+                    onNavigateToGame()
+                },
+                onDismiss = { viewModel.showDailyWordModal = false }
+            )
         }
     }
 }
@@ -470,16 +679,22 @@ private fun PaceOptionChip(
     subtitle: String,
     selected: Boolean,
     activeColor: Color,
+    isPaper: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val bg = if (selected) activeColor.copy(alpha = 0.18f) else (if (isPaper) Color(0xFFF3EBD8) else Color(0xFF1C1B1F))
+    val borderCol = if (selected) activeColor else (if (isPaper) Color(0xFFD7CCC8) else Color(0xFF49454F))
+    val titleCol = if (selected) activeColor else (if (isPaper) Color(0xFF2C1E14) else Color.White)
+    val subCol = if (isPaper) Color(0xFF5D4037) else Color(0xFFCAC4D0)
+
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) activeColor.copy(alpha = 0.22f) else Color(0xFF1C1B1F))
+            .background(bg)
             .border(
                 width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) activeColor else Color(0xFF49454F),
+                color = borderCol,
                 shape = RoundedCornerShape(12.dp)
             )
             .clickable(onClick = onClick)
@@ -488,14 +703,14 @@ private fun PaceOptionChip(
     ) {
         Text(
             text = title,
-            color = if (selected) activeColor else Color.White,
+            color = titleCol,
             fontWeight = FontWeight.ExtraBold,
             fontSize = 12.sp,
             textAlign = TextAlign.Center
         )
         Text(
             text = subtitle,
-            color = if (selected) Color.White else Color(0xFFCAC4D0),
+            color = subCol,
             fontSize = 10.sp,
             textAlign = TextAlign.Center
         )
@@ -506,16 +721,22 @@ private fun PaceOptionChip(
 private fun ThemeOptionChip(
     label: String,
     selected: Boolean,
+    isPaper: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val activeCol = if (isPaper) Color(0xFF1B365D) else Color(0xFFD0BCFF)
+    val bg = if (selected) activeCol.copy(alpha = 0.16f) else (if (isPaper) Color(0xFFF3EBD8) else Color(0xFF1C1B1F))
+    val borderCol = if (selected) activeCol else (if (isPaper) Color(0xFFD7CCC8) else Color(0xFF49454F))
+    val textCol = if (selected) activeCol else (if (isPaper) Color(0xFF2C1E14) else Color(0xFFE6E1E5))
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) Color(0xFFD0BCFF).copy(alpha = 0.22f) else Color(0xFF1C1B1F))
+            .background(bg)
             .border(
                 width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) Color(0xFFD0BCFF) else Color(0xFF49454F),
+                color = borderCol,
                 shape = RoundedCornerShape(10.dp)
             )
             .clickable(onClick = onClick)
@@ -524,7 +745,7 @@ private fun ThemeOptionChip(
     ) {
         Text(
             text = label,
-            color = if (selected) Color(0xFFD0BCFF) else Color(0xFFE6E1E5),
+            color = textCol,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             fontSize = 11.sp,
             textAlign = TextAlign.Center

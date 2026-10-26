@@ -35,7 +35,25 @@ data class ActivePiece(
 data class StencilSlot(
     val x: Int,
     val y: Int,
-    val expectedChar: Char
+    val expectedChar: Char,
+    val isHorizontal: Boolean = true
+)
+
+/**
+ * Snapshot of the game state before a move, enabling 1-tap "↩️ Отменить ход" (Undo) for seniors & kids.
+ */
+data class BoardSnapshot(
+    val boardCopy: Array<Array<GameCell?>>,
+    val score: Int,
+    val comboCount: Int,
+    val wordsClearedCount: Int,
+    val freeHintCharges: Int,
+    val activePiece: ActivePiece?,
+    val questWord: WordDefinition?,
+    val secondaryQuestWord: WordDefinition?,
+    val stencilSlots: List<StencilSlot>,
+    val stencilRow: Int,
+    val stencilStartCol: Int
 )
 
 data class CrosswordClue(
@@ -174,13 +192,17 @@ class GameEngine(
     var mode = GameMode.TETRIS
     var paceMode = PaceMode.PUZZLE_STEP // Default to calm, stress-free Puzzle Step mode!
     var selectedTheme = WordTheme.ALL
-    var isSingleTileMode = false // When true, spawns simple 1x1 letter tiles instead of 4-block shapes
-    var isLargeFontMode = true   // Default to comfortable large font & high contrast for family/seniors
+    var isSingleTileMode = false        // When true, spawns simple 1x1 letter tiles instead of 4-block shapes
+    var isLargeFontMode = true          // Default to comfortable large font & high contrast for family/seniors
+    var isPaperTheme = true             // Default to warm Paper/Magazine Crossword aesthetic for comfort!
+    var isCrossedStencilMode = false    // When true, places 2 intersecting words (Horizontal + Vertical) on the board!
+    var isDailyWordActive = false       // True when the current stencil is the Daily Word of the Day
+    var dailyWordCompletedToday = false
 
     var score = 0
     var comboCount = 0
     var wordsClearedCount = 0
-    var freeHintCharges = 3 // Start with 3 generous helper charges for family-friendly play
+    var freeHintCharges = 3
 
     var activePiece: ActivePiece? = null
     var nextPieceShapeType: Int = Random.nextInt(7)
@@ -190,15 +212,21 @@ class GameEngine(
     var heldPieceLetters: List<Char>? = null
     var canHoldThisTurn: Boolean = true
 
+    // Undo history stack (up to 8 moves)
+    val undoStack = ArrayDeque<BoardSnapshot>()
+
     // Current words selected for letters during Tetris game
     var levelTargetWords = mutableListOf<String>()
 
     // Active Crossword Stencil Puzzle ("Живой Кроссворд-Трафарет в середине поля")
     var questWordDefinition: WordDefinition? = null
+    var secondaryQuestWordDefinition: WordDefinition? = null // Used in Crossed 2-Word Stencil mode (Vertical word)
     var stencilSlots = mutableListOf<StencilSlot>()
-    var stencilRow: Int = rows - 2
+    var stencilRow: Int = rows - 3
     var stencilStartCol: Int = 2
     var lastResonanceWord: String? = null
+    var lastUnlockedWords = mutableListOf<String>()
+    var lastDailyWordJustSolved: Boolean = false
     var lastSafetyClearTriggered: Boolean = false
 
     // Gift letters entered by user
@@ -214,53 +242,237 @@ class GameEngine(
     }
 
     /**
-     * Chooses target words from the dictionary (filtered by selectedTheme) and sets the active Crossword Stencil word.
+     * Saves a snapshot before modifying the board so the player can tap "↩️ Шаг назад" (Undo) anytime.
+     */
+    fun saveUndoSnapshot() {
+        val copy = Array(rows) { r ->
+            Array(cols) { c ->
+                board[r][c]?.copy()
+            }
+        }
+        val snapshot = BoardSnapshot(
+            boardCopy = copy,
+            score = score,
+            comboCount = comboCount,
+            wordsClearedCount = wordsClearedCount,
+            freeHintCharges = freeHintCharges,
+            activePiece = activePiece?.copy(letters = activePiece?.letters?.toList() ?: emptyList()),
+            questWord = questWordDefinition,
+            secondaryQuestWord = secondaryQuestWordDefinition,
+            stencilSlots = stencilSlots.toList(),
+            stencilRow = stencilRow,
+            stencilStartCol = stencilStartCol
+        )
+        if (undoStack.size >= 8) {
+            undoStack.removeFirst()
+        }
+        undoStack.addLast(snapshot)
+    }
+
+    /**
+     * Restores the previous board state ("↩️ Отменить ход").
+     */
+    fun undoLastMove(): Boolean {
+        if (undoStack.isEmpty()) return false
+        val snap = undoStack.removeLast()
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                board[r][c] = snap.boardCopy[r][c]
+            }
+        }
+        score = snap.score
+        comboCount = snap.comboCount
+        wordsClearedCount = snap.wordsClearedCount
+        freeHintCharges = snap.freeHintCharges
+        questWordDefinition = snap.questWord
+        secondaryQuestWordDefinition = snap.secondaryQuestWord
+        stencilSlots.clear()
+        stencilSlots.addAll(snap.stencilSlots)
+        stencilRow = snap.stencilRow
+        stencilStartCol = snap.stencilStartCol
+        mode = GameMode.TETRIS
+        if (snap.activePiece != null) {
+            activePiece = snap.activePiece
+        } else {
+            spawnPiece()
+        }
+        return true
+    }
+
+    /**
+     * Chooses target words from the dictionary (filtered by selectedTheme) and sets the active Crossword Stencil word(s).
      */
     fun generateNewTargetWords() {
         levelTargetWords.clear()
+        isDailyWordActive = false
         val defs = Dictionary.getDefinitionsForTheme(isRussian, selectedTheme)
+            .filter { it.word.length in 3..6 }
+            .ifEmpty { Dictionary.getDefinitionsForLanguage(isRussian) }
+
         if (defs.isNotEmpty()) {
             val shuffled = defs.shuffled()
-            val selected = shuffled.take(4)
-            levelTargetWords.addAll(selected.map { it.word })
-            questWordDefinition = selected.firstOrNull()
+            val primary = shuffled.first()
+            questWordDefinition = primary
+            levelTargetWords.add(primary.word)
+
+            if (isCrossedStencilMode) {
+                // Find a second word that shares a common letter with primary for a 2D Crossed Stencil!
+                val crossCandidate = shuffled.drop(1).firstOrNull { cand ->
+                    cand.word.length in 3..5 && cand.word != primary.word && cand.word.any { ch -> primary.word.contains(ch) }
+                }
+                secondaryQuestWordDefinition = crossCandidate
+                if (crossCandidate != null) {
+                    levelTargetWords.add(crossCandidate.word)
+                }
+            } else {
+                secondaryQuestWordDefinition = null
+            }
+
+            shuffled.drop(1).take(3).forEach {
+                if (!levelTargetWords.contains(it.word)) {
+                    levelTargetWords.add(it.word)
+                }
+            }
         }
     }
 
     /**
+     * Places a specific word (such as a Custom Family Riddle or the Daily Word of the Day) directly on the board!
+     */
+    fun startSpecificWordOnBoard(def: WordDefinition, isDaily: Boolean = false) {
+        saveUndoSnapshot()
+        // Clear old anchor tiles first
+        for (slot in stencilSlots) {
+            if (isValidPoint(slot.x, slot.y) && board[slot.y][slot.x]?.isAnchor == true) {
+                board[slot.y][slot.x] = null
+            }
+        }
+        isDailyWordActive = isDaily
+        questWordDefinition = def
+        secondaryQuestWordDefinition = null
+        if (!levelTargetWords.contains(def.word)) {
+            levelTargetWords.add(0, def.word)
+        }
+        placeCrosswordStencilOnBoard()
+        spawnPiece()
+    }
+
+    /**
      * Places the "Slow Crossword Stencil" right on the board:
-     * Pre-fills most letters of the target word as anchor blocks and leaves 1 glowing empty gap slot
-     * so seniors/kids can visually see the crossword word on the board and drop the missing letter into it,
-     * which then triggers a classic Tetris line-clear explosion!
+     * Supports both 1-Word Horizontal Stencil AND 2-Word Crossed (Horizontal + Vertical) Stencil!
      */
     fun placeCrosswordStencilOnBoard() {
+        // Clear previous anchor tiles that belong to old stencils
+        for (slot in stencilSlots) {
+            if (isValidPoint(slot.x, slot.y) && board[slot.y][slot.x]?.isAnchor == true) {
+                board[slot.y][slot.x] = null
+            }
+        }
         stencilSlots.clear()
         val quest = questWordDefinition ?: return
-        val word = quest.word
+        val hWord = quest.word.take(cols - 2)
 
-        // Pick a comfortable row near the bottom/middle of the stack
+        val vDef = if (isCrossedStencilMode && !isDailyWordActive) secondaryQuestWordDefinition else null
+        val vWord = vDef?.word?.take(5)
+
+        if (vWord != null) {
+            // Find shared intersection character Indices
+            var intersectH = -1
+            var intersectV = -1
+            outer@ for (hi in hWord.indices) {
+                for (vi in vWord.indices) {
+                    if (hWord[hi] == vWord[vi]) {
+                        intersectH = hi
+                        intersectV = vi
+                        break@outer
+                    }
+                }
+            }
+
+            if (intersectH != -1 && intersectV != -1) {
+                // Place the cross comfortably in the lower-middle of the board
+                val targetRow = (rows - 2 - (vWord.length - 1 - intersectV)).coerceIn(7, rows - 2)
+                stencilRow = targetRow
+                stencilStartCol = ((cols - hWord.length) / 2).coerceIn(1, (cols - hWord.length).coerceAtLeast(1))
+                val crossCol = stencilStartCol + intersectH
+                val startRowV = stencilRow - intersectV
+
+                // Choose 1 missing slot on Horizontal (different from intersection if possible) and 1 missing slot on Vertical
+                val hMissingIdx = hWord.indices.firstOrNull { it != intersectH } ?: intersectH
+                val vMissingIdx = vWord.indices.lastOrNull { it != intersectV } ?: intersectV
+
+                // 1. Place Horizontal Word
+                for (i in hWord.indices) {
+                    val c = stencilStartCol + i
+                    if (!isValidPoint(c, stencilRow)) continue
+                    val ch = hWord[i]
+                    stencilSlots.add(StencilSlot(x = c, y = stencilRow, expectedChar = ch, isHorizontal = true))
+                    if (i != hMissingIdx) {
+                        board[stencilRow][c] = GameCell(
+                            char = ch,
+                            colorHex = "#5E35B1",
+                            isWildcard = false,
+                            isAnchor = true
+                        )
+                    } else {
+                        board[stencilRow][c] = null
+                    }
+                }
+
+                // 2. Place Vertical Word intersecting at (crossCol, stencilRow)
+                for (j in vWord.indices) {
+                    val r = startRowV + j
+                    if (!isValidPoint(crossCol, r)) continue
+                    val ch = vWord[j]
+                    if (stencilSlots.none { it.x == crossCol && it.y == r }) {
+                        stencilSlots.add(StencilSlot(x = crossCol, y = r, expectedChar = ch, isHorizontal = false))
+                    }
+                    if (j == intersectV) {
+                        // Keep the intersection cell as placed by Horizontal (or anchor if not missing)
+                        if (hMissingIdx != intersectH) {
+                            board[r][crossCol] = GameCell(
+                                char = ch,
+                                colorHex = "#5E35B1",
+                                isWildcard = false,
+                                isAnchor = true
+                            )
+                        }
+                    } else if (j != vMissingIdx) {
+                        board[r][crossCol] = GameCell(
+                            char = ch,
+                            colorHex = "#3949AB",
+                            isWildcard = false,
+                            isAnchor = true
+                        )
+                    } else {
+                        board[r][crossCol] = null
+                    }
+                }
+                return
+            }
+        }
+
+        // Standard 1-Word Horizontal Stencil
         var targetRow = rows - 2
         for (r in (rows - 2) downTo 6) {
             val occupiedCount = (0 until cols).count { board[r][it] != null && board[r][it]?.isAnchor != true }
-            if (occupiedCount <= cols - word.length - 1) {
+            if (occupiedCount <= cols - hWord.length - 1) {
                 targetRow = r
                 break
             }
         }
         stencilRow = targetRow
-        stencilStartCol = ((cols - word.length) / 2).coerceAtLeast(0)
+        stencilStartCol = ((cols - hWord.length) / 2).coerceAtLeast(0)
 
-        // Leave 1 central letter slot open as the puzzle gap
-        val missingIndex = if (word.length > 2) Random.nextInt(1, word.length - 1) else 0
+        val missingIndex = if (hWord.length > 2) Random.nextInt(1, hWord.length - 1) else 0
 
-        for (i in word.indices) {
+        for (i in hWord.indices) {
             val c = stencilStartCol + i
             if (!isValidPoint(c, stencilRow)) continue
-            val ch = word[i]
-            stencilSlots.add(StencilSlot(x = c, y = stencilRow, expectedChar = ch))
+            val ch = hWord[i]
+            stencilSlots.add(StencilSlot(x = c, y = stencilRow, expectedChar = ch, isHorizontal = true))
 
             if (i != missingIndex) {
-                // Place pre-filled Crossword Anchor Tile
                 board[stencilRow][c] = GameCell(
                     char = ch,
                     colorHex = "#5E35B1",
@@ -268,7 +480,6 @@ class GameEngine(
                     isAnchor = true
                 )
             } else {
-                // Leave this slot empty so the player can drop the matching letter into it (or use Magnet)
                 board[stencilRow][c] = null
             }
         }
@@ -276,7 +487,7 @@ class GameEngine(
 
     /**
      * Checks if the active Crossword Stencil on the board has been completed (either by matching letter,
-     * wildcard '★', or filling all stencil slots). When completed, clears the entire Tetris row!
+     * wildcard '★', or filling all stencil slots). When completed, clears the entire Tetris row (and cross)!
      */
     fun checkStencilCompletion(): Boolean {
         if (stencilSlots.isEmpty()) return false
@@ -288,23 +499,55 @@ class GameEngine(
         }
 
         if (allMatched) {
-            triggerStencilTetrisLineClear(quest.word)
+            val vWord = secondaryQuestWordDefinition?.word
+            val displaySolved = if (isCrossedStencilMode && vWord != null) {
+                "${quest.word} ✚ $vWord"
+            } else {
+                quest.word
+            }
+            triggerStencilTetrisLineClear(displaySolved, quest.word, vWord)
             return true
         }
         return false
     }
 
     /**
-     * Clears the entire row of the solved Crossword Stencil (plus any row above if stacked) like Tetris,
-     * shifts upper blocks down, awards points & free hints, and spawns the next Crossword Stencil!
+     * Clears the entire row of the solved Crossword Stencil (plus vertical cross tiles if in 2D mode) like Tetris,
+     * shifts upper blocks down, awards points & free hints, records unlocked words, and spawns the next Crossword Stencil!
      */
-    fun triggerStencilTetrisLineClear(solvedWord: String) {
+    fun triggerStencilTetrisLineClear(
+        solvedDisplay: String,
+        primaryWord: String = solvedDisplay,
+        secondaryWord: String? = null
+    ) {
         comboCount++
-        wordsClearedCount++
-        val bonus = 250 + (comboCount - 1) * 50
+        wordsClearedCount += if (secondaryWord != null) 2 else 1
+        val baseBonus = when {
+            isDailyWordActive -> 500
+            secondaryWord != null -> 400
+            else -> 250
+        }
+        val bonus = baseBonus + (comboCount - 1) * 50
         score += bonus
         freeHintCharges++
-        lastResonanceWord = solvedWord
+        lastResonanceWord = solvedDisplay
+
+        lastUnlockedWords.add(primaryWord)
+        if (secondaryWord != null) {
+            lastUnlockedWords.add(secondaryWord)
+        }
+        if (isDailyWordActive) {
+            dailyWordCompletedToday = true
+            lastDailyWordJustSolved = true
+            isDailyWordActive = false
+        }
+
+        // Clear all stencil slots first (handles vertical cross cells too!)
+        for (slot in stencilSlots) {
+            if (isValidPoint(slot.x, slot.y)) {
+                board[slot.y][slot.x] = null
+            }
+        }
 
         val rowToClear = stencilRow.coerceIn(0, rows - 1)
         // Clear the entire horizontal line at rowToClear (Tetris line vanish!)
@@ -333,6 +576,8 @@ class GameEngine(
             cell == null || (cell.char != slot.expectedChar && cell.char != Dictionary.WILDCARD_CHAR)
         } ?: return false
 
+        saveUndoSnapshot()
+
         if (freeHintCharges > 0) {
             freeHintCharges--
         } else {
@@ -355,9 +600,16 @@ class GameEngine(
      * to immediately trigger the Tetris Line Clear!
      */
     fun solveActiveStencilByWord(guess: String): Boolean {
+        val clean = guess.trim().uppercase()
         val quest = questWordDefinition ?: return false
-        if (quest.word.equals(guess.trim(), ignoreCase = true)) {
-            triggerStencilTetrisLineClear(quest.word)
+        val sec = secondaryQuestWordDefinition
+        if (quest.word.equals(clean, ignoreCase = true) || (sec != null && sec.word.equals(clean, ignoreCase = true))) {
+            saveUndoSnapshot()
+            triggerStencilTetrisLineClear(
+                solvedDisplay = if (sec != null && isCrossedStencilMode) "${quest.word} ✚ ${sec.word}" else quest.word,
+                primaryWord = quest.word,
+                secondaryWord = if (isCrossedStencilMode) sec?.word else null
+            )
             return true
         }
         return false
@@ -383,7 +635,6 @@ class GameEngine(
         }
 
         if (count == 1) {
-            // In 1-tile mode for kids/seniors, 85% of the time give the exact needed stencil letter, 15% Golden Star ★
             val singleChar = when {
                 giftLettersQueue.isNotEmpty() -> giftLettersQueue.removeAt(0)
                 missingStencilChars.isNotEmpty() && Random.nextFloat() < 0.88f -> missingStencilChars.random()
@@ -396,10 +647,8 @@ class GameEngine(
             if (giftLettersQueue.isNotEmpty()) {
                 pieceLetters.add(giftLettersQueue.removeAt(0))
             } else if (i == 0 && missingStencilChars.isNotEmpty()) {
-                // Guarantee the needed crossword letter is inside every piece!
                 pieceLetters.add(missingStencilChars.random())
             } else if (i == 1 && Random.nextFloat() < 0.16f) {
-                // Friendly Golden Wildcard ('★')
                 pieceLetters.add(Dictionary.WILDCARD_CHAR)
             } else if (Random.nextFloat() < 0.75f && levelTargetWords.isNotEmpty()) {
                 val word = levelTargetWords.random()
@@ -426,7 +675,6 @@ class GameEngine(
             nextPieceShapeType = if (isSingleTileMode) TetrominoShapes.SINGLE_TILE_SHAPE else Random.nextInt(7)
         }
 
-        // In Single-Tile mode, align X with the missing stencil slot or center for convenience
         val missingSlotX = stencilSlots.firstOrNull { slot ->
             isValidPoint(slot.x, slot.y) && board[slot.y][slot.x] == null
         }?.x
@@ -447,7 +695,6 @@ class GameEngine(
 
         if (checkCollision(piece)) {
             if (paceMode != PaceMode.ARCADE) {
-                // Soft Family No-Lose Protection: gently clear top rows instead of harsh punishment!
                 softClearTopRowsForFamily()
                 activePiece = piece
             } else {
@@ -462,7 +709,7 @@ class GameEngine(
 
     /**
      * Gentle "No-Lose" safety net for seniors, moms, and children:
-     * Clears the top 6 rows of non-anchor clutter so the game never abruptly ends in frustration.
+     * Clears the top rows of non-anchor clutter so the game never abruptly ends in frustration.
      */
     fun softClearTopRowsForFamily() {
         for (r in 0 until (rows - 4)) {
@@ -480,7 +727,6 @@ class GameEngine(
     fun shiftPieceLetters(): Boolean {
         val piece = activePiece ?: return false
         if (piece.letters.size < 2) {
-            // In 1-tile mode, shifting cycles between the needed stencil letter and the Golden Wildcard ★!
             val missingChar = stencilSlots.firstOrNull { slot ->
                 isValidPoint(slot.x, slot.y) && board[slot.y][slot.x] == null
             }?.expectedChar ?: Dictionary.WILDCARD_CHAR
@@ -544,7 +790,6 @@ class GameEngine(
     fun rotatePiece(): Boolean {
         val piece = activePiece ?: return false
         if (piece.shapeType == TetrominoShapes.SINGLE_TILE_SHAPE) {
-            // In 1-tile mode, tapping rotate shifts the letter to ★ or needed char
             return shiftPieceLetters()
         }
         val nextRotation = (piece.rotation + 1) % 4
@@ -564,16 +809,20 @@ class GameEngine(
     }
 
     fun hardDrop() {
+        saveUndoSnapshot()
         var dropSteps = 0
         while (movePiece(0, 1)) {
             dropSteps++
         }
         score += dropSteps * 2
-        lockPiece()
+        lockPiece(alreadySavedUndo = true)
     }
 
-    fun lockPiece() {
+    fun lockPiece(alreadySavedUndo: Boolean = false) {
         val piece = activePiece ?: return
+        if (!alreadySavedUndo) {
+            saveUndoSnapshot()
+        }
         val points = piece.getPoints()
         val baseColor = TetrominoShapes.COLORS[piece.shapeType % TetrominoShapes.COLORS.size]
 
@@ -614,7 +863,6 @@ class GameEngine(
 
         if (topReached) {
             if (paceMode != PaceMode.ARCADE) {
-                // Gentle family-friendly auto-clear so there's never a stressful Game Over
                 softClearTopRowsForFamily()
                 spawnPiece()
             } else {
@@ -631,7 +879,7 @@ class GameEngine(
         val foundClues = findAllBoardMatches(onlyTargetWord = target)
         if (foundClues.isNotEmpty()) {
             val match = foundClues.first()
-            triggerStencilTetrisLineClear(match.word)
+            triggerStencilTetrisLineClear(match.word, match.word, null)
         }
     }
 
@@ -809,6 +1057,7 @@ class GameEngine(
             wordsClearedCount++
             val reward = (150 * (1.0 + (comboCount - 1) * 0.2)).toInt()
             score += reward
+            lastUnlockedWords.add(clue.word)
 
             clearWordFromBoardAndLine(clue)
             return true
@@ -832,6 +1081,7 @@ class GameEngine(
         if (clue.revealedLettersCount >= clue.length) {
             clue.isRevealed = true
             clue.isSolved = true
+            lastUnlockedWords.add(clue.word)
             clearWordFromBoardAndLine(clue)
         }
         return true
@@ -864,6 +1114,7 @@ class GameEngine(
             clue.isRevealed = true
             clue.isSolved = true
             clue.revealedLettersCount = clue.length
+            lastUnlockedWords.add(clue.word)
 
             clearWordFromBoardAndLine(clue)
             return true
@@ -871,10 +1122,6 @@ class GameEngine(
         return false
     }
 
-    /**
-     * When a word is solved in Crossword Mode, clears the word AND vanishes its entire horizontal row
-     * like a classic Tetris line-clear so the stack drops dramatically!
-     */
     private fun clearWordFromBoardAndLine(clue: CrosswordClue) {
         val rowsAffected = clue.getCoordinates().map { it.y }.toSet()
         for (r in rowsAffected) {
@@ -925,6 +1172,7 @@ class GameEngine(
         val cleanWord = word.uppercase().trim()
         if (cleanWord.length >= 2 && Dictionary.isValidWord(cleanWord, isRussian)) {
             score += cleanWord.length * 25
+            lastUnlockedWords.add(cleanWord)
             for (char in cleanWord) {
                 giftLettersQueue.add(char)
             }
@@ -975,6 +1223,7 @@ class GameEngine(
         heldPieceShapeType = null
         heldPieceLetters = null
         canHoldThisTurn = true
+        undoStack.clear()
         mode = GameMode.TETRIS
         giftLettersQueue.clear()
         crosswordClues.clear()
@@ -1000,6 +1249,9 @@ object GameStateSerializer {
         root.put("selectedTheme", engine.selectedTheme.name)
         root.put("isSingleTileMode", engine.isSingleTileMode)
         root.put("isLargeFontMode", engine.isLargeFontMode)
+        root.put("isPaperTheme", engine.isPaperTheme)
+        root.put("isCrossedStencilMode", engine.isCrossedStencilMode)
+        root.put("dailyWordCompletedToday", engine.dailyWordCompletedToday)
         root.put("nextPieceShapeType", engine.nextPieceShapeType)
         root.put("heldPieceShapeType", engine.heldPieceShapeType ?: -1)
 
@@ -1052,6 +1304,9 @@ object GameStateSerializer {
             engine.selectedTheme = runCatching { WordTheme.valueOf(themeName) }.getOrDefault(WordTheme.ALL)
             engine.isSingleTileMode = root.optBoolean("isSingleTileMode", false)
             engine.isLargeFontMode = root.optBoolean("isLargeFontMode", true)
+            engine.isPaperTheme = root.optBoolean("isPaperTheme", true)
+            engine.isCrossedStencilMode = root.optBoolean("isCrossedStencilMode", false)
+            engine.dailyWordCompletedToday = root.optBoolean("dailyWordCompletedToday", false)
             engine.nextPieceShapeType = root.optInt("nextPieceShapeType", 0)
 
             val heldShape = root.optInt("heldPieceShapeType", -1)
@@ -1078,6 +1333,12 @@ object GameStateSerializer {
                     engine.levelTargetWords.first(),
                     engine.isRussian
                 )
+                if (engine.isCrossedStencilMode && engine.levelTargetWords.size >= 2) {
+                    engine.secondaryQuestWordDefinition = Dictionary.findFirstMatchingDefinition(
+                        engine.levelTargetWords[1],
+                        engine.isRussian
+                    )
+                }
             }
 
             engine.giftLettersQueue.clear()

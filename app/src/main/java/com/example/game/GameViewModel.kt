@@ -1,11 +1,14 @@
 package com.example.game
 
 import android.app.Application
+import android.speech.tts.TextToSpeech
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.database.CustomFamilyWordEntity
 import com.example.data.database.GameDatabase
 import com.example.data.database.GameRepository
 import com.example.data.database.HighScoreEntity
@@ -15,6 +18,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: GameRepository
@@ -22,29 +26,45 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     // Central Game Engine
     val engine = GameEngine(cols = 10, rows = 15, isRussian = true)
 
+    // Android Text-To-Speech for reading riddles, words, and fun facts aloud to seniors & children
+    private var tts: TextToSpeech? = null
+    private var isTtsReady = false
+
     // Observable States to trigger recompositions in Jetpack Compose
-    var currentScore by mutableStateOf(0)
-    var comboCount by mutableStateOf(0)
-    var wordsClearedCount by mutableStateOf(0)
-    var freeHintCharges by mutableStateOf(3)
+    var currentScore by mutableIntStateOf(0)
+    var comboCount by mutableIntStateOf(0)
+    var wordsClearedCount by mutableIntStateOf(0)
+    var freeHintCharges by mutableIntStateOf(3)
     var currentMode by mutableStateOf(GameMode.TETRIS)
     var paceMode by mutableStateOf(PaceMode.PUZZLE_STEP)
     var selectedTheme by mutableStateOf(WordTheme.ALL)
     var isSingleTileMode by mutableStateOf(false)
     var isLargeFontMode by mutableStateOf(true)
+    var isPaperTheme by mutableStateOf(true)
+    var isCrossedStencilMode by mutableStateOf(false)
+    var canUndo by mutableStateOf(false)
+
+    // Modals & Celebration triggers
     var showRiddleSpotlight by mutableStateOf(false)
+    var showEncyclopediaModal by mutableStateOf(false)
+    var showCustomWordCreatorModal by mutableStateOf(false)
+    var showDailyWordModal by mutableStateOf(false)
+    var celebrationTriggerTick by mutableIntStateOf(0)
+    var dailyWordCompletedToday by mutableStateOf(false)
 
     var isRussian by mutableStateOf(true)
     var activePiece by mutableStateOf<ActivePiece?>(null)
-    var nextPieceShapeType by mutableStateOf(0)
+    var nextPieceShapeType by mutableIntStateOf(0)
     var heldPieceShapeType by mutableStateOf<Int?>(null)
     var canHoldThisTurn by mutableStateOf(true)
     var questWord by mutableStateOf<WordDefinition?>(null)
+    var secondaryQuestWord by mutableStateOf<WordDefinition?>(null)
     var stencilSlots by mutableStateOf<List<StencilSlot>>(emptyList())
+    var unlockedWordsSet by mutableStateOf<Set<String>>(emptySet())
     var targetWords = mutableListOf<String>()
     var giftLetters = mutableListOf<Char>()
     var crosswordClues = mutableListOf<CrosswordClue>()
-    var boardStateTick by mutableStateOf(0) // incremented to force recompose on array updates
+    var boardStateTick by mutableIntStateOf(0) // incremented to force recompose on array updates
 
     // Explicit User Pause State
     var isUserPaused by mutableStateOf(false)
@@ -68,8 +88,60 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+        initTextToSpeech(application)
         syncStatesFromEngine()
-        attemptAutoLoadSavedGame()
+        loadPersistentFamilyDataAndSavedGame()
+    }
+
+    private fun initTextToSpeech(application: Application) {
+        runCatching {
+            tts = TextToSpeech(application.applicationContext) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    isTtsReady = true
+                    tts?.setSpeechRate(0.92f)
+                }
+            }
+        }
+    }
+
+    /**
+     * Speaks any riddle, word, or educational fact aloud using Android TTS (plus visual confirmation)
+     */
+    fun speakText(text: String) {
+        if (text.isBlank()) return
+        runCatching {
+            if (isTtsReady && tts != null) {
+                val locale = if (isRussian) Locale("ru", "RU") else Locale.US
+                tts?.language = locale
+                tts?.setSpeechRate(0.92f)
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tetricross_tts")
+            }
+        }
+        showToast(if (isRussian) "🔊 Озвучивание: $text" else "🔊 Speaking: $text")
+    }
+
+    /**
+     * Speaks the active Crossword Stencil riddle(s) aloud for seniors and kids
+     */
+    fun speakActiveRiddle() {
+        val primary = questWord ?: return
+        val secondary = if (isCrossedStencilMode) secondaryQuestWord else null
+        val speech = if (isRussian) {
+            buildString {
+                append("Загадка по горизонтали, ${primary.word.length} буквы: ${primary.definition}.")
+                if (secondary != null) {
+                    append(" Загадка по вертикали, ${secondary.word.length} буквы: ${secondary.definition}.")
+                }
+            }
+        } else {
+            buildString {
+                append("Across riddle, ${primary.word.length} letters: ${primary.definition}.")
+                if (secondary != null) {
+                    append(" Down riddle, ${secondary.word.length} letters: ${secondary.definition}.")
+                }
+            }
+        }
+        speakText(speech)
     }
 
     /**
@@ -85,22 +157,53 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         selectedTheme = engine.selectedTheme
         isSingleTileMode = engine.isSingleTileMode
         isLargeFontMode = engine.isLargeFontMode
+        isPaperTheme = engine.isPaperTheme
+        isCrossedStencilMode = engine.isCrossedStencilMode
+        dailyWordCompletedToday = engine.dailyWordCompletedToday
+        canUndo = engine.undoStack.isNotEmpty()
         isRussian = engine.isRussian
         activePiece = engine.activePiece
         nextPieceShapeType = engine.nextPieceShapeType
         heldPieceShapeType = engine.heldPieceShapeType
         canHoldThisTurn = engine.canHoldThisTurn
         questWord = engine.questWordDefinition
+        secondaryQuestWord = engine.secondaryQuestWordDefinition
         stencilSlots = engine.stencilSlots.toList()
         targetWords = engine.levelTargetWords.toMutableList()
         giftLetters = engine.giftLettersQueue.toMutableList()
         crosswordClues = engine.crosswordClues.toMutableList()
 
+        // Persist any newly unlocked words into the Family Encyclopedia Album
+        if (engine.lastUnlockedWords.isNotEmpty()) {
+            val newlyUnlocked = engine.lastUnlockedWords.toList()
+            engine.lastUnlockedWords.clear()
+            val updated = unlockedWordsSet.toMutableSet()
+            newlyUnlocked.forEach { w ->
+                updated.add(w.uppercase().trim())
+            }
+            unlockedWordsSet = updated
+            viewModelScope.launch {
+                newlyUnlocked.forEach { w ->
+                    repository.insertUnlockedWord(w)
+                }
+            }
+        }
+
         engine.lastResonanceWord?.let { resonated ->
-            showToast(
-                if (isRussian) "✨ СЛОВО «$resonated» СОБРАНО! Линия исчезла! +250 очков и +1 подсказка!"
-                else "✨ WORD \"$resonated\" COMPLETED! Line vanished! +250 pts & +1 Free Hint!"
-            )
+            celebrationTriggerTick++
+            if (engine.lastDailyWordJustSolved) {
+                engine.lastDailyWordJustSolved = false
+                showDailyWordModal = true
+                showToast(
+                    if (isRussian) "☀️ СЛОВО ДНЯ «$resonated» РАЗГАДАНО! +500 очков и доброе пожелание семье!"
+                    else "☀️ WORD OF THE DAY \"$resonated\" SOLVED! +500 pts & a warm family wish!"
+                )
+            } else {
+                showToast(
+                    if (isRussian) "🎉 СЛОВО «$resonated» СОБРАНО! Салют и очистка линии! Открыто в Альбоме слов!"
+                    else "🎉 WORD \"$resonated\" COMPLETED! Line vanished & unlocked in Word Album!"
+                )
+            }
             engine.lastResonanceWord = null
         }
 
@@ -115,14 +218,36 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         boardStateTick++
     }
 
-    private fun attemptAutoLoadSavedGame() {
+    private fun loadPersistentFamilyDataAndSavedGame() {
         viewModelScope.launch {
             try {
+                // 1. Load custom family riddles
+                val customEntities = repository.getCustomFamilyWords()
+                customEntities.forEach { entity ->
+                    Dictionary.addCustomFamilyWord(
+                        word = entity.word,
+                        clue = entity.clue,
+                        funFact = entity.funFact,
+                        isRussian = entity.isRussian
+                    )
+                }
+
+                // 2. Load unlocked encyclopedia words
+                val savedUnlocked = repository.getUnlockedWords()
+                if (savedUnlocked.isNotEmpty()) {
+                    unlockedWordsSet = savedUnlocked
+                } else {
+                    // Seed with 2 starter words so the Encyclopedia Album is immediately welcoming!
+                    val starters = setOf("ДОМ", "МАМА", "HOME", "MAMA")
+                    unlockedWordsSet = starters
+                    starters.forEach { repository.insertUnlockedWord(it) }
+                }
+
+                // 3. Restore saved game state
                 val savedJson = repository.loadSavedGame()
                 if (savedJson != null) {
                     GameStateSerializer.deserialize(savedJson, engine)
                     syncStatesFromEngine()
-                    showToast(if (isRussian) "Предыдущая игра восстановлена!" else "Previous game restored!")
                 }
             } catch (e: Throwable) {
                 e.printStackTrace()
@@ -154,6 +279,105 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.clearLeaderboard()
         }
+    }
+
+    /**
+     * Undo last move ("↩️ Отменить ход") for seniors & kids
+     */
+    fun undoMove() {
+        if (engine.undoLastMove()) {
+            syncStatesFromEngine()
+            saveGameProgress()
+            showToast(
+                if (isRussian) "↩️ Ход отменён! Поле возвращено на шаг назад."
+                else "↩️ Move undone! Board restored one step back."
+            )
+        } else {
+            showToast(
+                if (isRussian) "Нет предыдущего хода для отмены"
+                else "No previous move to undo"
+            )
+        }
+    }
+
+    /**
+     * Toggles between Warm Paper/Magazine Crossword Theme ("📰 Бумага") and Cozy Night Theme ("🌙 Ночь")
+     */
+    fun togglePaperTheme() {
+        engine.isPaperTheme = !engine.isPaperTheme
+        syncStatesFromEngine()
+        saveGameProgress()
+        showToast(
+            if (engine.isPaperTheme) {
+                if (isRussian) "📰 Включена светлая «Бумажная тема» в стиле журнала кроссвордов!"
+                else "📰 Warm Paper Crossword Magazine theme enabled!"
+            } else {
+                if (isRussian) "🌙 Включена уютная вечерняя тёмная тема!"
+                else "🌙 Cozy Night Dark theme enabled!"
+            }
+        )
+    }
+
+    /**
+     * Toggles between 1-Word Stencil and Crossed 2-Word Stencil ("✚ Перекрёсток из 2 слов")
+     */
+    fun toggleCrossedStencilMode() {
+        engine.isCrossedStencilMode = !engine.isCrossedStencilMode
+        engine.skipToNextStencilPuzzle()
+        syncStatesFromEngine()
+        saveGameProgress()
+        showToast(
+            if (engine.isCrossedStencilMode) {
+                if (isRussian) "✚ Включён «Перекрёстный трафарет»: 2 слова с общей буквой в центре!"
+                else "✚ Crossed 2-Word Stencil ON: Horizontal + Vertical words!"
+            } else {
+                if (isRussian) "➖ Включён классический трафарет из 1 слова"
+                else "➖ Classic 1-Word Stencil ON"
+            }
+        )
+    }
+
+    /**
+     * Creates a Custom Family Word & Riddle and places it right onto the board!
+     */
+    fun createAndPlayCustomFamilyWord(word: String, clue: String, funFact: String): Boolean {
+        val customDef = Dictionary.addCustomFamilyWord(word, clue, funFact, isRussian) ?: return false
+        viewModelScope.launch {
+            repository.insertCustomFamilyWord(
+                CustomFamilyWordEntity(
+                    word = customDef.word,
+                    clue = customDef.definition,
+                    funFact = customDef.funFact,
+                    isRussian = isRussian
+                )
+            )
+            repository.insertUnlockedWord(customDef.word)
+        }
+        unlockedWordsSet = unlockedWordsSet + customDef.word
+        engine.startSpecificWordOnBoard(customDef, isDaily = false)
+        syncStatesFromEngine()
+        saveGameProgress()
+        showCustomWordCreatorModal = false
+        showToast(
+            if (isRussian) "❤️ Семейное слово «${customDef.word}» загадано и выложено на поле!"
+            else "❤️ Family word \"${customDef.word}\" saved and placed on the board!"
+        )
+        return true
+    }
+
+    /**
+     * Starts the special Daily Word of the Day ("☀️ Слово Дня") on the board!
+     */
+    fun startDailyWordChallenge() {
+        val dailyDef = Dictionary.getDailyWord(isRussian)
+        engine.startSpecificWordOnBoard(dailyDef, isDaily = true)
+        syncStatesFromEngine()
+        saveGameProgress()
+        showDailyWordModal = false
+        showToast(
+            if (isRussian) "☀️ Слово Дня размещено на трафарете! Разгадайте его для особого бонуса +500 очков!"
+            else "☀️ Word of the Day placed on the board! Solve it for +500 bonus points!"
+        )
     }
 
     /**
@@ -325,7 +549,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun startGameLoop() {
         if (isPlaying || isUserPaused) return
-        // In PUZZLE_STEP mode, pieces never fall automatically!
         if (engine.paceMode == PaceMode.PUZZLE_STEP) {
             isPlaying = false
             gameLoopJob?.cancel()
@@ -338,7 +561,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             while (isPlaying && !isUserPaused && engine.mode == GameMode.TETRIS && engine.paceMode != PaceMode.PUZZLE_STEP) {
                 val delayTime = when (engine.paceMode) {
                     PaceMode.PUZZLE_STEP -> 3000L
-                    PaceMode.RELAXED -> 2600L // Very slow, constant, calm speed without acceleration
+                    PaceMode.RELAXED -> 2600L
                     PaceMode.ARCADE -> maxOf(300L, (800 - (engine.score / 250) * 40).toLong())
                 }
                 delay(delayTime)
@@ -406,9 +629,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Cyclically shifts the letters inside the falling piece
-     */
     fun shiftPieceLetters() {
         if (engine.mode == GameMode.TETRIS && !isUserPaused) {
             if (engine.shiftPieceLetters()) {
@@ -417,9 +637,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Swaps the active falling piece with the Hold Pocket slot
-     */
     fun holdPiece() {
         if (engine.mode == GameMode.TETRIS && !isUserPaused) {
             if (engine.holdCurrentPiece()) {
@@ -437,9 +654,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Progressive Hint 1: Opens 1 letter of the crossword word (-15 pts or 1 free hint charge)
-     */
     fun revealOneLetterHint(clueId: String) {
         if (engine.mode == GameMode.CROSSWORD) {
             val usedFree = engine.freeHintCharges > 0
@@ -457,9 +671,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Progressive Hint 2: Highlights the word's exact cells on the 2D board ("Word Radar")
-     */
     fun toggleWordRadar(clueId: String) {
         if (engine.mode == GameMode.CROSSWORD) {
             val usedFree = engine.freeHintCharges > 0
@@ -476,9 +687,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Spends 50 points to reveal a crossword word completely and clear it
-     */
     fun payToRevealClue(clueId: String) {
         if (engine.mode == GameMode.CROSSWORD) {
             val success = engine.attemptRevealWord(clueId)
@@ -490,13 +698,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Submits a text guess for a specific crossword clue list item
-     */
     fun guessClue(clueId: String, guess: String) {
         if (engine.mode == GameMode.CROSSWORD) {
             val correct = engine.attemptGuessWord(clueId, guess)
             if (correct) {
+                celebrationTriggerTick++
                 syncStatesFromEngine()
                 saveGameProgress()
                 showToast(
@@ -510,9 +716,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * User enters a custom word (or guesses the active Stencil word directly!).
-     */
     fun submitGiftWord(word: CharSequence) {
         val text = word.toString().uppercase().trim()
         if (text.length < 2) {
@@ -520,7 +723,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // First check if the user typed the exact answer to the active Crossword Stencil on the board!
         if (engine.solveActiveStencilByWord(text)) {
             syncStatesFromEngine()
             saveGameProgress()
@@ -543,9 +745,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Check if the user can skip / resume Tetris
-     */
     fun resumeTetrisAfterCrossword() {
         if (engine.canResumeTetris()) {
             engine.mode = GameMode.TETRIS
@@ -566,9 +765,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Completely resets current game board
-     */
     fun restartGame() {
         isUserPaused = false
         pauseGameLoop()
@@ -590,5 +786,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         pauseGameLoop()
+        runCatching {
+            tts?.stop()
+            tts?.shutdown()
+        }
     }
 }
