@@ -16,11 +16,11 @@ data class GameCell(
 )
 
 data class ActivePiece(
-    val shapeType: Int, // 0 to 6 (I, O, T, S, Z, J, L)
+    val shapeType: Int, // 0 to 6 (I, O, T, S, Z, J, L), or 7 for Single-Tile 1x1 Kids/Senior Puzzle mode!
     val x: Int,
     val y: Int,
     val rotation: Int = 0,
-    val letters: List<Char> // Always 4 letters
+    val letters: List<Char> // 4 letters for tetrominoes, or 1 letter for Single-Tile mode
 ) {
     fun getPoints(): List<GridPoint> {
         val offsets = TetrominoShapes.getOffsets(shapeType, rotation)
@@ -86,55 +86,64 @@ enum class PaceMode(val delayMs: Long) {
 }
 
 object TetrominoShapes {
+    const val SINGLE_TILE_SHAPE = 7
+
     val SHAPES = listOf(
-        // I shape
+        // 0: I shape
         listOf(
             listOf(0 to -1, 0 to 0, 0 to 1, 0 to 2),
             listOf(-1 to 0, 0 to 0, 1 to 0, 2 to 0),
             listOf(0 to -1, 0 to 0, 0 to 1, 0 to 2),
             listOf(-1 to 0, 0 to 0, 1 to 0, 2 to 0)
         ),
-        // O shape
+        // 1: O shape
         listOf(
             listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1),
             listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1),
             listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1),
             listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1)
         ),
-        // T shape
+        // 2: T shape
         listOf(
             listOf(0 to 0, -1 to 0, 1 to 0, 0 to -1),
             listOf(0 to 0, 0 to -1, 0 to 1, 1 to 0),
             listOf(0 to 0, -1 to 0, 1 to 0, 0 to 1),
             listOf(0 to 0, 0 to -1, 0 to 1, -1 to 0)
         ),
-        // S shape
+        // 3: S shape
         listOf(
             listOf(0 to 0, 1 to 0, 0 to 1, -1 to 1),
             listOf(0 to 0, 0 to -1, 1 to 0, 1 to 1),
             listOf(0 to 0, 1 to 0, 0 to 1, -1 to 1),
             listOf(0 to 0, 0 to -1, 1 to 0, 1 to 1)
         ),
-        // Z shape
+        // 4: Z shape
         listOf(
             listOf(0 to 0, -1 to 0, 0 to 1, 1 to 1),
             listOf(0 to 0, 0 to 1, 1 to 0, 1 to -1),
             listOf(0 to 0, -1 to 0, 0 to 1, 1 to 1),
             listOf(0 to 0, 0 to 1, 1 to 0, 1 to -1)
         ),
-        // J shape
+        // 5: J shape
         listOf(
             listOf(0 to 0, 0 to -1, 0 to 1, -1 to 1),
             listOf(0 to 0, -1 to 0, 1 to 0, 1 to 1),
             listOf(0 to 0, 0 to -1, 0 to 1, 1 to -1),
             listOf(0 to 0, -1 to 0, -1 to -1, 1 to 0)
         ),
-        // L shape
+        // 6: L shape
         listOf(
             listOf(0 to 0, 0 to -1, 0 to 1, 1 to 1),
             listOf(0 to 0, -1 to 0, 1 to 0, -1 to 1),
             listOf(0 to 0, 0 to -1, 0 to 1, -1 to -1),
             listOf(0 to 0, -1 to 0, 1 to -1, 1 to 0)
+        ),
+        // 7: Single 1x1 Puzzle Tile (for Kids & Cozy Puzzle Mode!)
+        listOf(
+            listOf(0 to 0),
+            listOf(0 to 0),
+            listOf(0 to 0),
+            listOf(0 to 0)
         )
     )
 
@@ -145,11 +154,12 @@ object TetrominoShapes {
         "#81C784", // Green
         "#E57373", // Red
         "#64B5F6", // Blue
-        "#FFB74D"  // Orange
+        "#FFB74D", // Orange
+        "#00E676"  // Emerald for 1x1 Puzzle Tile
     )
 
     fun getOffsets(shapeId: Int, rotation: Int): List<Pair<Int, Int>> {
-        val rotations = SHAPES[shapeId.coerceAtLeast(0) % SHAPES.size]
+        val rotations = SHAPES[shapeId.coerceIn(0, SHAPES.lastIndex)]
         return rotations[rotation.coerceAtLeast(0) % rotations.size]
     }
 }
@@ -163,6 +173,10 @@ class GameEngine(
 
     var mode = GameMode.TETRIS
     var paceMode = PaceMode.PUZZLE_STEP // Default to calm, stress-free Puzzle Step mode!
+    var selectedTheme = WordTheme.ALL
+    var isSingleTileMode = false // When true, spawns simple 1x1 letter tiles instead of 4-block shapes
+    var isLargeFontMode = true   // Default to comfortable large font & high contrast for family/seniors
+
     var score = 0
     var comboCount = 0
     var wordsClearedCount = 0
@@ -185,6 +199,7 @@ class GameEngine(
     var stencilRow: Int = rows - 2
     var stencilStartCol: Int = 2
     var lastResonanceWord: String? = null
+    var lastSafetyClearTriggered: Boolean = false
 
     // Gift letters entered by user
     val giftLettersQueue = mutableListOf<Char>()
@@ -199,11 +214,11 @@ class GameEngine(
     }
 
     /**
-     * Chooses target words from the dictionary and sets the active Crossword Stencil word.
+     * Chooses target words from the dictionary (filtered by selectedTheme) and sets the active Crossword Stencil word.
      */
     fun generateNewTargetWords() {
         levelTargetWords.clear()
-        val defs = Dictionary.getDefinitionsForLanguage(isRussian)
+        val defs = Dictionary.getDefinitionsForTheme(isRussian, selectedTheme)
         if (defs.isNotEmpty()) {
             val shuffled = defs.shuffled()
             val selected = shuffled.take(4)
@@ -214,8 +229,8 @@ class GameEngine(
 
     /**
      * Places the "Slow Crossword Stencil" right on the board:
-     * Pre-fills most letters of the target word as anchor blocks and leaves 1–2 glowing empty gap slots
-     * so seniors/kids can visually see the crossword word on the board and drop the missing letter(s) into it,
+     * Pre-fills most letters of the target word as anchor blocks and leaves 1 glowing empty gap slot
+     * so seniors/kids can visually see the crossword word on the board and drop the missing letter into it,
      * which then triggers a classic Tetris line-clear explosion!
      */
     fun placeCrosswordStencilOnBoard() {
@@ -223,10 +238,10 @@ class GameEngine(
         val quest = questWordDefinition ?: return
         val word = quest.word
 
-        // Pick a comfortable row near the bottom/middle of the stack (e.g. row 13 or highest free row)
+        // Pick a comfortable row near the bottom/middle of the stack
         var targetRow = rows - 2
         for (r in (rows - 2) downTo 6) {
-            val occupiedCount = (0 until cols).count { board[r][it] != null }
+            val occupiedCount = (0 until cols).count { board[r][it] != null && board[r][it]?.isAnchor != true }
             if (occupiedCount <= cols - word.length - 1) {
                 targetRow = r
                 break
@@ -235,7 +250,7 @@ class GameEngine(
         stencilRow = targetRow
         stencilStartCol = ((cols - word.length) / 2).coerceAtLeast(0)
 
-        // Decide which 1 or 2 indices of the word are left open as puzzle slots
+        // Leave 1 central letter slot open as the puzzle gap
         val missingIndex = if (word.length > 2) Random.nextInt(1, word.length - 1) else 0
 
         for (i in word.indices) {
@@ -280,7 +295,7 @@ class GameEngine(
     }
 
     /**
-     * Clears the entire row of the solved Crossword Stencil (plus any adjacent debris) like Tetris,
+     * Clears the entire row of the solved Crossword Stencil (plus any row above if stacked) like Tetris,
      * shifts upper blocks down, awards points & free hints, and spawns the next Crossword Stencil!
      */
     fun triggerStencilTetrisLineClear(solvedWord: String) {
@@ -297,7 +312,7 @@ class GameEngine(
             board[rowToClear][c] = null
         }
 
-        // Apply smooth gravity so blocks above drop down by 1 row
+        // Apply smooth gravity so blocks above drop down
         applyGravityToStackedBlocks()
 
         // Generate the next Crossword Puzzle word and place its stencil
@@ -353,10 +368,10 @@ class GameEngine(
     }
 
     /**
-     * Generates 4 friendly letters for a falling piece:
+     * Generates friendly letters for a falling piece:
      * Always includes the missing letter(s) needed for the active Crossword Stencil!
      */
-    private fun generateBalancedPieceLetters(): List<Char> {
+    private fun generateBalancedPieceLetters(count: Int): List<Char> {
         val pieceLetters = mutableListOf<Char>()
         val vowels = if (isRussian) "АЕИОУЯ" else "AEIOU"
         val consonants = if (isRussian) "БВДГКЛМНПРСТЧШ" else "TNSRLDMCGPKB"
@@ -367,13 +382,23 @@ class GameEngine(
             if (cell == null || cell.char != slot.expectedChar) slot.expectedChar else null
         }
 
-        for (i in 0 until 4) {
+        if (count == 1) {
+            // In 1-tile mode for kids/seniors, 85% of the time give the exact needed stencil letter, 15% Golden Star ★
+            val singleChar = when {
+                giftLettersQueue.isNotEmpty() -> giftLettersQueue.removeAt(0)
+                missingStencilChars.isNotEmpty() && Random.nextFloat() < 0.88f -> missingStencilChars.random()
+                else -> Dictionary.WILDCARD_CHAR
+            }
+            return listOf(singleChar)
+        }
+
+        for (i in 0 until count) {
             if (giftLettersQueue.isNotEmpty()) {
                 pieceLetters.add(giftLettersQueue.removeAt(0))
             } else if (i == 0 && missingStencilChars.isNotEmpty()) {
                 // Guarantee the needed crossword letter is inside every piece!
                 pieceLetters.add(missingStencilChars.random())
-            } else if (i == 1 && Random.nextFloat() < 0.14f) {
+            } else if (i == 1 && Random.nextFloat() < 0.16f) {
                 // Friendly Golden Wildcard ('★')
                 pieceLetters.add(Dictionary.WILDCARD_CHAR)
             } else if (Random.nextFloat() < 0.75f && levelTargetWords.isNotEmpty()) {
@@ -386,20 +411,29 @@ class GameEngine(
         }
 
         if (pieceLetters.none { it in vowels || it == Dictionary.WILDCARD_CHAR }) {
-            pieceLetters[Random.nextInt(4)] = vowels.random()
+            pieceLetters[Random.nextInt(pieceLetters.size)] = vowels.random()
         }
         return pieceLetters
     }
 
     fun spawnPiece(customShape: Int? = null, customLetters: List<Char>? = null) {
-        val shapeType = customShape ?: nextPieceShapeType
+        val shapeType = when {
+            customShape != null -> customShape
+            isSingleTileMode -> TetrominoShapes.SINGLE_TILE_SHAPE
+            else -> nextPieceShapeType
+        }
         if (customShape == null) {
-            nextPieceShapeType = Random.nextInt(7)
+            nextPieceShapeType = if (isSingleTileMode) TetrominoShapes.SINGLE_TILE_SHAPE else Random.nextInt(7)
         }
 
-        val startX = cols / 2
+        // In Single-Tile mode, align X with the missing stencil slot or center for convenience
+        val missingSlotX = stencilSlots.firstOrNull { slot ->
+            isValidPoint(slot.x, slot.y) && board[slot.y][slot.x] == null
+        }?.x
+        val startX = missingSlotX ?: (cols / 2)
         val startY = 1
-        val pieceLetters = customLetters ?: generateBalancedPieceLetters()
+        val letterCount = if (shapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
+        val pieceLetters = customLetters ?: generateBalancedPieceLetters(letterCount)
 
         val piece = ActivePiece(
             shapeType = shapeType,
@@ -412,17 +446,49 @@ class GameEngine(
         canHoldThisTurn = true
 
         if (checkCollision(piece)) {
-            mode = GameMode.CROSSWORD
-            scanBoardForCrosswordWords()
-            activePiece = null
+            if (paceMode != PaceMode.ARCADE) {
+                // Soft Family No-Lose Protection: gently clear top rows instead of harsh punishment!
+                softClearTopRowsForFamily()
+                activePiece = piece
+            } else {
+                mode = GameMode.CROSSWORD
+                scanBoardForCrosswordWords()
+                activePiece = null
+            }
         } else {
             activePiece = piece
         }
     }
 
+    /**
+     * Gentle "No-Lose" safety net for seniors, moms, and children:
+     * Clears the top 6 rows of non-anchor clutter so the game never abruptly ends in frustration.
+     */
+    fun softClearTopRowsForFamily() {
+        for (r in 0 until (rows - 4)) {
+            for (c in 0 until cols) {
+                if (board[r][c]?.isAnchor != true) {
+                    board[r][c] = null
+                }
+            }
+        }
+        applyGravityToStackedBlocks()
+        placeCrosswordStencilOnBoard()
+        lastSafetyClearTriggered = true
+    }
+
     fun shiftPieceLetters(): Boolean {
         val piece = activePiece ?: return false
-        if (piece.letters.size < 2) return false
+        if (piece.letters.size < 2) {
+            // In 1-tile mode, shifting cycles between the needed stencil letter and the Golden Wildcard ★!
+            val missingChar = stencilSlots.firstOrNull { slot ->
+                isValidPoint(slot.x, slot.y) && board[slot.y][slot.x] == null
+            }?.expectedChar ?: Dictionary.WILDCARD_CHAR
+            val current = piece.letters.firstOrNull() ?: missingChar
+            val nextChar = if (current == Dictionary.WILDCARD_CHAR) missingChar else Dictionary.WILDCARD_CHAR
+            activePiece = piece.copy(letters = listOf(nextChar))
+            return true
+        }
         val shifted = listOf(piece.letters.last()) + piece.letters.dropLast(1)
         activePiece = piece.copy(letters = shifted)
         return true
@@ -477,6 +543,10 @@ class GameEngine(
 
     fun rotatePiece(): Boolean {
         val piece = activePiece ?: return false
+        if (piece.shapeType == TetrominoShapes.SINGLE_TILE_SHAPE) {
+            // In 1-tile mode, tapping rotate shifts the letter to ★ or needed char
+            return shiftPieceLetters()
+        }
         val nextRotation = (piece.rotation + 1) % 4
         val candidates = listOf(
             piece.copy(rotation = nextRotation),
@@ -534,17 +604,23 @@ class GameEngine(
         // 3. Check standard Tetris completed horizontal lines
         checkCompletedLines()
 
-        var triggeredOver = false
+        var topReached = false
         for (col in 0 until cols) {
-            if (board[0][col] != null || board[1][col] != null) {
-                triggeredOver = true
+            if (board[0][col] != null || board[1][col] != null || board[2][col] != null) {
+                topReached = true
                 break
             }
         }
 
-        if (triggeredOver) {
-            mode = GameMode.CROSSWORD
-            scanBoardForCrosswordWords()
+        if (topReached) {
+            if (paceMode != PaceMode.ARCADE) {
+                // Gentle family-friendly auto-clear so there's never a stressful Game Over
+                softClearTopRowsForFamily()
+                spawnPiece()
+            } else {
+                mode = GameMode.CROSSWORD
+                scanBoardForCrosswordWords()
+            }
         } else {
             spawnPiece()
         }
@@ -589,7 +665,6 @@ class GameEngine(
                 3 -> 700 * comboCount
                 else -> 1200 * comboCount
             }
-            // Refresh stencil if its row was shifted
             placeCrosswordStencilOnBoard()
         }
     }
@@ -689,7 +764,7 @@ class GameEngine(
         crosswordClues.addAll(findAllBoardMatches())
 
         if (crosswordClues.isEmpty()) {
-            val fallbackDefs = Dictionary.getDefinitionsForLanguage(isRussian)
+            val fallbackDefs = Dictionary.getDefinitionsForTheme(isRussian, selectedTheme)
                 .filter { it.word.length in 3..5 }
                 .shuffled()
                 .take(2)
@@ -868,7 +943,7 @@ class GameEngine(
     }
 
     fun forceLowerStackAndResume() {
-        for (r in 0 until 5) {
+        for (r in 0 until 6) {
             for (c in 0 until cols) {
                 board[r][c] = null
             }
@@ -881,7 +956,6 @@ class GameEngine(
     }
 
     fun skipToNextStencilPuzzle() {
-        // Clear previous anchor blocks on stencilRow
         for (slot in stencilSlots) {
             if (isValidPoint(slot.x, slot.y) && board[slot.y][slot.x]?.isAnchor == true) {
                 board[slot.y][slot.x] = null
@@ -923,6 +997,9 @@ object GameStateSerializer {
         root.put("isRussian", engine.isRussian)
         root.put("mode", engine.mode.name)
         root.put("paceMode", engine.paceMode.name)
+        root.put("selectedTheme", engine.selectedTheme.name)
+        root.put("isSingleTileMode", engine.isSingleTileMode)
+        root.put("isLargeFontMode", engine.isLargeFontMode)
         root.put("nextPieceShapeType", engine.nextPieceShapeType)
         root.put("heldPieceShapeType", engine.heldPieceShapeType ?: -1)
 
@@ -971,13 +1048,17 @@ object GameStateSerializer {
             engine.mode = runCatching { GameMode.valueOf(modeName) }.getOrDefault(GameMode.TETRIS)
             val paceName = root.optString("paceMode", PaceMode.PUZZLE_STEP.name)
             engine.paceMode = runCatching { PaceMode.valueOf(paceName) }.getOrDefault(PaceMode.PUZZLE_STEP)
+            val themeName = root.optString("selectedTheme", WordTheme.ALL.name)
+            engine.selectedTheme = runCatching { WordTheme.valueOf(themeName) }.getOrDefault(WordTheme.ALL)
+            engine.isSingleTileMode = root.optBoolean("isSingleTileMode", false)
+            engine.isLargeFontMode = root.optBoolean("isLargeFontMode", true)
             engine.nextPieceShapeType = root.optInt("nextPieceShapeType", 0)
 
             val heldShape = root.optInt("heldPieceShapeType", -1)
             val heldLettersJson = root.optJSONArray("heldPieceLetters")
-            if (heldShape >= 0 && heldLettersJson != null && heldLettersJson.length() == 4) {
+            if (heldShape >= 0 && heldLettersJson != null && heldLettersJson.length() > 0) {
                 engine.heldPieceShapeType = heldShape
-                engine.heldPieceLetters = (0 until 4).map {
+                engine.heldPieceLetters = (0 until heldLettersJson.length()).map {
                     heldLettersJson.optString(it, "A").firstOrNull() ?: 'A'
                 }
             }

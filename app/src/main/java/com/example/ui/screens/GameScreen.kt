@@ -52,7 +52,9 @@ fun GameScreen(
     val focusManager = LocalFocusManager.current
 
     BackHandler {
-        if (viewModel.isUserPaused) {
+        if (viewModel.showRiddleSpotlight) {
+            viewModel.dismissRiddleSpotlight()
+        } else if (viewModel.isUserPaused) {
             viewModel.resumeFromPause()
         } else {
             viewModel.pauseGameLoop()
@@ -81,6 +83,7 @@ fun GameScreen(
     var giftTextInput by remember { mutableStateOf("") }
     var activeGuessingClue by remember { mutableStateOf<CrosswordClue?>(null) }
     var clueGuessInput by remember { mutableStateOf("") }
+    var spotlightGuessInput by remember { mutableStateOf("") }
     var showGameOverDialog by remember { mutableStateOf(false) }
     var playerNameInput by remember { mutableStateOf("") }
 
@@ -112,7 +115,7 @@ fun GameScreen(
                         Text(
                             text = if (viewModel.isRussian) "ТетриКросс" else "TetriCross",
                             fontWeight = FontWeight.Black,
-                            fontSize = 17.sp,
+                            fontSize = 16.sp,
                             color = Color.White
                         )
                         if (viewModel.comboCount > 1) {
@@ -150,6 +153,36 @@ fun GameScreen(
                     }
                 },
                 actions = {
+                    // 1-Tap Kids/Senior Single-Tile (1x1) vs 4-Block Toggle
+                    FilledTonalButton(
+                        onClick = { viewModel.toggleSingleTileMode() },
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (viewModel.isSingleTileMode) Color(0xFF004D40) else Color(0xFF2B2930),
+                            contentColor = if (viewModel.isSingleTileMode) Color(0xFF00E676) else Color(0xFFCAC4D0)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (viewModel.isSingleTileMode) Color(0xFF00E676) else Color(0xFF49454F)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("single_tile_mode_button")
+                    ) {
+                        Text(
+                            text = if (viewModel.isSingleTileMode) {
+                                if (viewModel.isRussian) "🧒 1-Буква" else "🧒 1-Tile"
+                            } else {
+                                if (viewModel.isRussian) "🧱 4-Фигура" else "🧱 4-Block"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
                     // 1-Tap Pace Mode Switcher (Puzzle Step / Very Slow / Arcade)
                     FilledTonalButton(
                         onClick = { viewModel.cyclePaceMode() },
@@ -169,26 +202,26 @@ fun GameScreen(
                                 PaceMode.ARCADE -> Color(0xFFD0BCFF)
                             }
                         ),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         modifier = Modifier
-                            .height(36.dp)
+                            .height(34.dp)
                             .testTag("pace_mode_button")
                     ) {
                         Text(
                             text = when (viewModel.paceMode) {
-                                PaceMode.PUZZLE_STEP -> if (viewModel.isRussian) "🌿 Пазл (Без таймера)" else "🌿 Puzzle"
+                                PaceMode.PUZZLE_STEP -> if (viewModel.isRussian) "🌿 Пазл" else "🌿 Puzzle"
                                 PaceMode.RELAXED -> if (viewModel.isRussian) "🐢 Медленно" else "🐢 Slow"
                                 PaceMode.ARCADE -> if (viewModel.isRussian) "⚡ Аркада" else "⚡ Arcade"
                             },
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
+                            fontSize = 10.sp
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
 
-                    // Prominent Pause / Resume Button
+                    // Prominent Pause / Stop-Frame Button
                     FilledTonalButton(
                         onClick = { viewModel.toggleUserPause() },
                         colors = ButtonDefaults.filledTonalButtonColors(
@@ -196,26 +229,26 @@ fun GameScreen(
                             contentColor = if (viewModel.isUserPaused) Color(0xFF10281C) else Color(0xFFD0BCFF)
                         ),
                         border = BorderStroke(1.dp, if (viewModel.isUserPaused) Color(0xFF81C784) else Color(0xFF49454F)),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         modifier = Modifier
-                            .height(36.dp)
+                            .height(34.dp)
                             .testTag("pause_button")
                     ) {
                         Icon(
                             imageVector = if (viewModel.isUserPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                             contentDescription = if (viewModel.isUserPaused) "Resume" else "Pause",
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Text(
                             text = if (viewModel.isUserPaused) {
                                 if (viewModel.isRussian) "Пуск" else "Play"
                             } else {
-                                if (viewModel.isRussian) "Пауза" else "Pause"
+                                if (viewModel.isRussian) "Стоп" else "Pause"
                             },
                             fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
+                            fontSize = 10.sp
                         )
                     }
 
@@ -364,6 +397,122 @@ fun GameScreen(
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp),
                         textAlign = TextAlign.Center
                     )
+                }
+            }
+
+            // --- LARGE CROSSWORD RIDDLE SPOTLIGHT MODAL (For Seniors, Moms, & Kids) ---
+            if (viewModel.showRiddleSpotlight) {
+                viewModel.questWord?.let { quest ->
+                    Dialog(onDismissRequest = { viewModel.dismissRiddleSpotlight() }) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                                .border(2.dp, Color(0xFFFFD54F), RoundedCornerShape(20.dp)),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2930)),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = if (viewModel.isRussian) "🧩 ЗАГАДКА КРОССВОРДА" else "🧩 CROSSWORD RIDDLE",
+                                    color = Color(0xFFFFD54F),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 18.sp
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFFD0BCFF).copy(alpha = 0.15f))
+                                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "${quest.category.ifBlank { if (viewModel.isRussian) "Семья" else "Family" }} • ${quest.word.length} " +
+                                            (if (viewModel.isRussian) "букв(ы)" else "letters"),
+                                        color = Color(0xFFD0BCFF),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                }
+
+                                Text(
+                                    text = quest.definition,
+                                    color = Color.White,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 24.sp
+                                )
+
+                                OutlinedTextField(
+                                    value = spotlightGuessInput,
+                                    onValueChange = { spotlightGuessInput = it.uppercase().trim() },
+                                    label = {
+                                        Text(
+                                            if (viewModel.isRussian) "Знаете ответ? Введите слово целиком:"
+                                            else "Know the answer? Type the full word:"
+                                        )
+                                    },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color(0xFFFFD54F),
+                                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            viewModel.useMagnetHelper()
+                                            viewModel.dismissRiddleSpotlight()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF00E676),
+                                            contentColor = Color(0xFF10281C)
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = if (viewModel.isRussian) "🧲 Магнит буквы" else "🧲 Magnet Letter",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            if (spotlightGuessInput.isNotBlank()) {
+                                                viewModel.submitGiftWord(spotlightGuessInput)
+                                                spotlightGuessInput = ""
+                                            }
+                                            viewModel.dismissRiddleSpotlight()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFFD0BCFF),
+                                            contentColor = Color(0xFF381E72)
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = if (viewModel.isRussian) "Продолжить" else "Continue",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -670,24 +819,46 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                     )
                 }
 
-                // Cleared Words Column
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = if (viewModel.isRussian) "СЛОВ" else "WORDS",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Color(0xFFCAC4D0),
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 9.sp
+                // Cleared Words Column + Large Font Toggle
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IconButton(
+                        onClick = { viewModel.toggleLargeFontMode() },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (viewModel.isLargeFontMode) Color(0xFFFFD54F).copy(alpha = 0.2f)
+                                else Color(0xFF1C1B1F)
+                            )
+                            .testTag("large_font_button")
+                    ) {
+                        Text(
+                            text = "👓",
+                            fontSize = 13.sp
                         )
-                    )
-                    Text(
-                        text = "$wordsCount",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            color = Color(0xFF81C784),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = if (viewModel.isRussian) "СЛОВ" else "WORDS",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color(0xFFCAC4D0),
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 9.sp
+                            )
                         )
-                    )
+                        Text(
+                            text = "$wordsCount",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                color = Color(0xFF81C784),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                        )
+                    }
                 }
             }
 
@@ -714,7 +885,8 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color(0xFF1C1B1F))
-                            .border(1.dp, Color(0xFFFFD54F).copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFFFFD54F).copy(alpha = 0.65f), RoundedCornerShape(10.dp))
+                            .clickable { viewModel.openRiddleSpotlight() }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -731,7 +903,7 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                 },
                                 color = Color(0xFFFFD54F),
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp,
+                                fontSize = if (viewModel.isLargeFontMode) 13.sp else 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -745,7 +917,7 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                 FilledTonalButton(
                                     onClick = { viewModel.useMagnetHelper() },
                                     colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = Color(0xFF00E676).copy(alpha = 0.2f),
+                                        containerColor = Color(0xFF00E676).copy(alpha = 0.22f),
                                         contentColor = Color(0xFF00E676)
                                     ),
                                     border = BorderStroke(1.dp, Color(0xFF00E676)),
@@ -783,8 +955,8 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                         // Large readable clue text for seniors, moms, and children
                         Text(
                             text = quest.definition,
-                            color = Color.White.copy(alpha = 0.92f),
-                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.95f),
+                            fontSize = if (viewModel.isLargeFontMode) 13.sp else 11.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -847,7 +1019,7 @@ fun BoardView(
     viewModel: GameViewModel,
     onNavigateBack: () -> Unit
 ) {
-    key(viewModel.boardStateTick, viewModel.isUserPaused) {
+    key(viewModel.boardStateTick, viewModel.isUserPaused, viewModel.isLargeFontMode) {
         val board = viewModel.engine.board
         val rows = viewModel.engine.rows
         val cols = viewModel.engine.cols
@@ -991,8 +1163,8 @@ fun BoardView(
                                             activeChar != null -> Color(0xFFD0BCFF)
                                             isAnchorTile -> Color(0xFF4527A0) // Deep Crossword Anchor Tile
                                             cell != null -> Color(0xFF49454F)
-                                            isOpenStencilTarget -> Color(0xFFFFD54F).copy(alpha = 0.22f) // Glowing Crossword Target Slot!
-                                            isGhost -> Color(0xFFD0BCFF).copy(alpha = 0.12f)
+                                            isOpenStencilTarget -> Color(0xFFFFD54F).copy(alpha = 0.25f) // Glowing Crossword Target Slot!
+                                            isGhost -> Color(0xFFD0BCFF).copy(alpha = 0.14f)
                                             else -> Color.Transparent
                                         }
                                     )
@@ -1016,7 +1188,7 @@ fun BoardView(
                                             )
                                             isAnchorTile -> Modifier.border(
                                                 1.5.dp,
-                                                Color(0xFFFFD54F).copy(alpha = 0.85f),
+                                                Color(0xFFFFD54F).copy(alpha = 0.88f),
                                                 RoundedCornerShape(4.dp)
                                             )
                                             cell != null -> Modifier.border(
@@ -1044,13 +1216,13 @@ fun BoardView(
                                 if (displayText.isNotEmpty()) {
                                     Text(
                                         text = displayText,
-                                        fontSize = 13.sp,
+                                        fontSize = if (viewModel.isLargeFontMode) 15.sp else 13.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontFamily = FontFamily.Monospace,
                                         color = when {
                                             isWildcard -> Color(0xFF1C1B1F)
                                             activeChar != null -> Color(0xFF381E72)
-                                            isOpenStencilTarget -> Color(0xFFFFD54F).copy(alpha = 0.75f)
+                                            isOpenStencilTarget -> Color(0xFFFFD54F).copy(alpha = 0.82f)
                                             isAnchorTile -> Color(0xFFFFF59D)
                                             else -> Color(0xFFE6E1E5)
                                         },
@@ -1091,7 +1263,7 @@ fun BoardView(
                             modifier = Modifier.size(48.dp)
                         )
                         Text(
-                            text = if (viewModel.isRussian) "ИГРА НА ПАУЗЕ" else "GAME PAUSED",
+                            text = if (viewModel.isRussian) "СТОП-КАДР / ПАУЗА" else "GAME PAUSED",
                             color = Color(0xFFD0BCFF),
                             fontWeight = FontWeight.Black,
                             fontSize = 20.sp,
@@ -1099,9 +1271,9 @@ fun BoardView(
                         )
                         Text(
                             text = if (viewModel.isRussian) {
-                                "Совет: в режиме «🌿 Пазл» фигуры не падают сами — вы можете спокойно собирать слово кроссворда в центре поля или нажать «🧲 Магнит»!"
+                                "Совет: в режиме «🌿 Пазл» фигуры не падают сами — вы можете спокойно собирать слово кроссворда в центре поля, включить «🧒 1-Букву» или нажать «🧲 Магнит»!"
                             } else {
-                                "Tip: In '🌿 Puzzle' mode pieces never fall on their own — take your time completing the crossword word on the grid or tap '🧲 Magnet'!"
+                                "Tip: In '🌿 Puzzle' mode pieces never fall on their own — take your time completing the crossword word on the grid, toggle '🧒 1-Tile', or tap '🧲 Magnet'!"
                             },
                             color = Color(0xFFCAC4D0),
                             fontSize = 12.sp,
@@ -1499,7 +1671,7 @@ fun LiveCrosswordPanel(
                         Text(
                             text = clue.clue,
                             color = Color.White.copy(alpha = if (clue.isSolved) 0.6f else 0.92f),
-                            fontSize = 12.sp,
+                            fontSize = if (viewModel.isLargeFontMode) 14.sp else 12.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )

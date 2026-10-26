@@ -29,6 +29,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var freeHintCharges by mutableStateOf(3)
     var currentMode by mutableStateOf(GameMode.TETRIS)
     var paceMode by mutableStateOf(PaceMode.PUZZLE_STEP)
+    var selectedTheme by mutableStateOf(WordTheme.ALL)
+    var isSingleTileMode by mutableStateOf(false)
+    var isLargeFontMode by mutableStateOf(true)
+    var showRiddleSpotlight by mutableStateOf(false)
+
     var isRussian by mutableStateOf(true)
     var activePiece by mutableStateOf<ActivePiece?>(null)
     var nextPieceShapeType by mutableStateOf(0)
@@ -77,6 +82,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         freeHintCharges = engine.freeHintCharges
         currentMode = engine.mode
         paceMode = engine.paceMode
+        selectedTheme = engine.selectedTheme
+        isSingleTileMode = engine.isSingleTileMode
+        isLargeFontMode = engine.isLargeFontMode
         isRussian = engine.isRussian
         activePiece = engine.activePiece
         nextPieceShapeType = engine.nextPieceShapeType
@@ -94,6 +102,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 else "✨ WORD \"$resonated\" COMPLETED! Line vanished! +250 pts & +1 Free Hint!"
             )
             engine.lastResonanceWord = null
+        }
+
+        if (engine.lastSafetyClearTriggered) {
+            showToast(
+                if (isRussian) "🧹 Мягкая защита: верхние ряды бережно расчищены, игра продолжается!"
+                else "🧹 Gentle Safety Net: top rows cleared so you can keep playing calmly!"
+            )
+            engine.lastSafetyClearTriggered = false
         }
 
         boardStateTick++
@@ -152,6 +168,71 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         syncStatesFromEngine()
         showToast(if (engine.isRussian) "Язык изменён на Русский" else "Language changed to English")
         saveGameProgress()
+    }
+
+    /**
+     * Selects a family thematic word collection
+     */
+    fun selectTheme(theme: WordTheme) {
+        engine.selectedTheme = theme
+        engine.skipToNextStencilPuzzle()
+        if (engine.mode == GameMode.CROSSWORD) {
+            engine.scanBoardForCrosswordWords()
+        }
+        syncStatesFromEngine()
+        saveGameProgress()
+        val label = when (theme) {
+            WordTheme.ALL -> if (isRussian) "📚 Все темы" else "📚 All Themes"
+            WordTheme.HOME_COOKING -> if (isRussian) "🏡 Дом и Кулинария" else "🏡 Home & Cooking"
+            WordTheme.NATURE_ANIMALS -> if (isRussian) "🌿 Природа и Животные" else "🌿 Nature & Animals"
+            WordTheme.FAIRY_TALES_KIDS -> if (isRussian) "🧚 Сказки и Детство" else "🧚 Fairy Tales & Kids"
+        }
+        showToast(if (isRussian) "Выбрана тема: $label" else "Selected theme: $label")
+    }
+
+    /**
+     * Toggles between 1x1 Single-Tile Puzzle mode (for kids/seniors) and 4-block shapes
+     */
+    fun toggleSingleTileMode() {
+        engine.isSingleTileMode = !engine.isSingleTileMode
+        engine.spawnPiece()
+        syncStatesFromEngine()
+        saveGameProgress()
+        showToast(
+            if (engine.isSingleTileMode) {
+                if (isRussian) "🧒 Включён режим «1-Плитка»: падает по одной удобной букве!"
+                else "🧒 Single-Tile Mode ON: one easy letter tile at a time!"
+            } else {
+                if (isRussian) "🧱 Включён режим «Фигуры из 4 букв»"
+                else "🧱 4-Letter Tetromino Mode ON"
+            }
+        )
+    }
+
+    /**
+     * Toggles Senior High-Contrast Large Font Mode
+     */
+    fun toggleLargeFontMode() {
+        engine.isLargeFontMode = !engine.isLargeFontMode
+        syncStatesFromEngine()
+        saveGameProgress()
+        showToast(
+            if (engine.isLargeFontMode) {
+                if (isRussian) "👓 Крупный шрифт и повышенный контраст включены!"
+                else "👓 Large Font & High Contrast enabled!"
+            } else {
+                if (isRussian) "Стандартный размер шрифта"
+                else "Standard font size"
+            }
+        )
+    }
+
+    fun openRiddleSpotlight() {
+        showRiddleSpotlight = true
+    }
+
+    fun dismissRiddleSpotlight() {
+        showRiddleSpotlight = false
     }
 
     /**
@@ -326,7 +407,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Cyclically shifts the 4 letters inside the falling piece
+     * Cyclically shifts the letters inside the falling piece
      */
     fun shiftPieceLetters() {
         if (engine.mode == GameMode.TETRIS && !isUserPaused) {
