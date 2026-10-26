@@ -1,0 +1,6 @@
+{
+  "name": "TetriCross",
+  "description": "Half Tetris, half crossword puzzle game! When blocks stack up, clear them by guessing words or spending points. Earn points by guessing, placing words, or entering custom secret words.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
