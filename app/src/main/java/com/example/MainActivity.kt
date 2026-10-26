@@ -22,9 +22,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
-                // Shared view model to retain progress or trigger operations
-                val gameViewModel: GameViewModel = viewModel()
+            val gameViewModel: GameViewModel = viewModel()
+            MyApplicationTheme(isPaperTheme = gameViewModel.isPaperTheme) {
                 var currentScreen by rememberSaveable { mutableStateOf("MENU") }
 
                 when (currentScreen) {

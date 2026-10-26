@@ -65,7 +65,7 @@ object Dictionary {
             "Душистая румяная буханка с хрустящей корочкой",
             "Кулинария",
             WordTheme.HOME_COOKING,
-            "Запах свежеиспечённого домашнего хлеба официально признан одним из самых успокаивающих и радостных ароматов для человека."
+            "Аромат свежеиспечённого домашнего хлеба рождается при подрумянивании корочки в печи и сразу создаёт в доме ощущение тепла и уюта."
         ),
         WordDefinition(
             "БОРЩ",
@@ -263,7 +263,7 @@ object Dictionary {
             "Белое пушистое одеяло зимы из резных снежинок",
             "Природа",
             WordTheme.NATURE_ANIMALS,
-            "Каждая снежинка всегда имеет ровно шесть лучей, но при этом её кружевной узор никогда не повторяется дважды!"
+            "Кристаллы льда в облаках обычно растут в виде шестилучевых звёздочек, причём кружевной узор каждой снежинки складывается неповторимо!"
         ),
         WordDefinition(
             "ВОЛНА",
@@ -602,7 +602,7 @@ object Dictionary {
             "A tiny winged magical helper from bedtime stories",
             "Fairy Tales",
             WordTheme.FAIRY_TALES_KIDS,
-            "Fairy tales have been passed down by grandparents around cozy hearths for ratusan of generations."
+            "Fairy tales have been passed down by grandparents around cozy hearths for hundreds of generations."
         ),
         WordDefinition(
             "MAGIC",
@@ -655,9 +655,20 @@ object Dictionary {
         )
     )
 
+    fun isValidAlphabetForLanguage(word: String, isRussian: Boolean): Boolean {
+        val clean = word.uppercase().trim()
+        if (clean.isEmpty()) return false
+        return if (isRussian) {
+            clean.all { it in 'А'..'Я' || it == 'Ё' }
+        } else {
+            clean.all { it in 'A'..'Z' }
+        }
+    }
+
     fun addCustomFamilyWord(word: String, clue: String, funFact: String, isRussian: Boolean): WordDefinition? {
         val cleanWord = word.uppercase().trim().filter { it.isLetter() }
         if (cleanWord.length !in 3..8 || clue.isBlank()) return null
+        if (!isValidAlphabetForLanguage(cleanWord, isRussian)) return null
         val customDef = WordDefinition(
             word = cleanWord,
             definition = clue.trim(),
@@ -669,9 +680,30 @@ object Dictionary {
             },
             isCustomFamilyWord = true
         )
-        customFamilyWords.removeAll { it.word == cleanWord }
+        customFamilyWords.removeAll { normalizeYo(it.word) == normalizeYo(cleanWord) }
         customFamilyWords.add(0, customDef)
         return customDef
+    }
+
+    fun removeCustomFamilyWord(word: String): Boolean {
+        val clean = normalizeYo(word)
+        return customFamilyWords.removeAll { normalizeYo(it.word) == clean }
+    }
+
+    fun getCurrentCalendarDayKey(): Int {
+        val cal = Calendar.getInstance()
+        return cal.get(Calendar.YEAR) * 1000 + cal.get(Calendar.DAY_OF_YEAR)
+    }
+
+    fun russianLettersPlural(count: Int): String {
+        val mod100 = count % 100
+        val mod10 = count % 10
+        return when {
+            mod100 in 11..14 -> "$count букв"
+            mod10 == 1 -> "$count буква"
+            mod10 in 2..4 -> "$count буквы"
+            else -> "$count букв"
+        }
     }
 
     fun getDefinitionsForLanguage(isRussian: Boolean): List<WordDefinition> {

@@ -47,6 +47,7 @@ private data class ConfettiParticle(
 @Composable
 fun ConfettiCelebrationOverlay(
     triggerTick: Int,
+    onConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (triggerTick <= 0) return
@@ -83,6 +84,7 @@ fun ConfettiCelebrationOverlay(
             targetValue = 1f,
             animationSpec = tween(durationMillis = 1250, easing = FastOutSlowInEasing)
         )
+        onConsumed()
     }
 
     val p = progress.value
@@ -233,13 +235,13 @@ fun FamilyWordEncyclopediaDialog(
                                             contentColor = accentColor
                                         ),
                                         shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(28.dp)
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(36.dp)
                                     ) {
                                         Text(
                                             text = if (viewModel.isRussian) "🔊 Слушать" else "🔊 Listen",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 10.sp
+                                            fontSize = 11.sp
                                         )
                                     }
                                 }
@@ -412,6 +414,59 @@ fun CustomFamilyRiddleCreatorDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                val savedCustomWords = remember(viewModel.boardStateTick, viewModel.isRussian) {
+                    Dictionary.customFamilyWords.filter {
+                        Dictionary.isValidAlphabetForLanguage(it.word, viewModel.isRussian)
+                    }
+                }
+
+                if (savedCustomWords.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(accentColor.copy(alpha = 0.08f))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (viewModel.isRussian) "Созданные семейные слова:" else "Saved family words:",
+                            color = accentColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                        savedCustomWords.take(4).forEach { item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${item.word} — ${item.definition}",
+                                    color = textPrimary,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    onClick = { viewModel.deleteCustomFamilyWord(item.word) },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("delete_custom_word_${item.word}")
+                                ) {
+                                    Text(
+                                        text = if (viewModel.isRussian) "🗑️ Удалить" else "🗑️ Delete",
+                                        color = Color(0xFFE53935),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 errorHint?.let { err ->
                     Text(
                         text = err,
@@ -440,6 +495,12 @@ fun CustomFamilyRiddleCreatorDialog(
                         onClick = {
                             if (customWord.length < 3) {
                                 errorHint = if (viewModel.isRussian) "Введите слово от 3 до 8 букв" else "Enter a word of 3–8 letters"
+                            } else if (!Dictionary.isValidAlphabetForLanguage(customWord, viewModel.isRussian)) {
+                                errorHint = if (viewModel.isRussian) {
+                                    "Используйте только русские буквы (А–Я)"
+                                } else {
+                                    "Please use English letters (A–Z) only"
+                                }
                             } else if (customClue.isBlank()) {
                                 errorHint = if (viewModel.isRussian) "Напишите подсказку-загадку" else "Please enter a clue"
                             } else {
@@ -515,13 +576,19 @@ fun DailyWordOfTheDayDialog(
                         .background(accentColor.copy(alpha = 0.16f))
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
+                    val maskedWord = remember(dailyDef.word) {
+                        List(dailyDef.word.length) { "★" }.joinToString(" ")
+                    }
                     Text(
                         text = if (viewModel.dailyWordCompletedToday) {
                             if (viewModel.isRussian) "✅ Разгадано сегодня: ${dailyDef.word} (+500 очков)"
                             else "✅ Completed Today: ${dailyDef.word} (+500 pts)"
                         } else {
-                            if (viewModel.isRussian) "Особая награда: +500 очков • ${dailyDef.word.length} букв(ы)"
-                            else "Special Reward: +500 pts • ${dailyDef.word.length} letters"
+                            if (viewModel.isRussian) {
+                                "Особая награда: +500 очков • ${Dictionary.russianLettersPlural(dailyDef.word.length)} ($maskedWord)"
+                            } else {
+                                "Special Reward: +500 pts • ${dailyDef.word.length} letters ($maskedWord)"
+                            }
                         },
                         color = accentColor,
                         fontWeight = FontWeight.Bold,
@@ -588,6 +655,7 @@ fun DailyWordOfTheDayDialog(
 
                     Button(
                         onClick = onStartDailyWord,
+                        enabled = !viewModel.dailyWordCompletedToday,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = accentColor,
                             contentColor = if (isPaper) Color.White else Color(0xFF1C1B1F)
@@ -597,7 +665,11 @@ fun DailyWordOfTheDayDialog(
                             .testTag("start_daily_word_button")
                     ) {
                         Text(
-                            text = if (viewModel.isRussian) "☀️ Разгадать на поле" else "☀️ Solve on Board",
+                            text = if (viewModel.dailyWordCompletedToday) {
+                                if (viewModel.isRussian) "✅ Уже отгадано" else "✅ Solved Today"
+                            } else {
+                                if (viewModel.isRussian) "☀️ Разгадать на поле" else "☀️ Solve on Board"
+                            },
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )

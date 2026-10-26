@@ -120,6 +120,15 @@ class GameDatabase private constructor(context: Context) :
             }
         }
 
+        override suspend fun deleteCustomFamilyWord(word: String) {
+            try {
+                val db = writableDatabase
+                db.delete("custom_family_words", "word = ?", arrayOf(word.uppercase().trim()))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         override suspend fun getUnlockedWords(): Set<String> {
             val set = mutableSetOf<String>()
             try {

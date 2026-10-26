@@ -35,6 +35,10 @@ class GameRepository(private val gameDao: GameDao) {
         gameDao.insertCustomFamilyWord(entity)
     }
 
+    suspend fun deleteCustomFamilyWord(word: String) = withContext(Dispatchers.IO) {
+        gameDao.deleteCustomFamilyWord(word)
+    }
+
     suspend fun getUnlockedWords(): Set<String> = withContext(Dispatchers.IO) {
         gameDao.getUnlockedWords()
     }

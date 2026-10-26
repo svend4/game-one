@@ -166,7 +166,7 @@ fun MenuScreen(
                     ) {
                         Text(
                             text = if (viewModel.isRussian) {
-                                "☀️ Слово Дня (${dailyWord.word.length} букв)"
+                                "☀️ Слово Дня (${Dictionary.russianLettersPlural(dailyWord.word.length)})"
                             } else {
                                 "☀️ Word of the Day (${dailyWord.word.length} letters)"
                             },

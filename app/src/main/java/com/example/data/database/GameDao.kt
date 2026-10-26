@@ -18,6 +18,7 @@ interface GameDao {
     suspend fun deleteSavedGame()
     suspend fun getCustomFamilyWords(): List<CustomFamilyWordEntity>
     suspend fun insertCustomFamilyWord(entity: CustomFamilyWordEntity)
+    suspend fun deleteCustomFamilyWord(word: String)
     suspend fun getUnlockedWords(): Set<String>
     suspend fun insertUnlockedWord(word: String)
 }

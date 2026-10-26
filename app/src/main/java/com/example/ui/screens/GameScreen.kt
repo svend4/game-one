@@ -40,6 +40,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.game.*
 import kotlinx.coroutines.delay
 import kotlin.math.abs
@@ -51,6 +54,7 @@ fun GameScreen(
     onNavigateBack: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val isPaper = viewModel.isPaperTheme
     val screenBg = if (isPaper) Color(0xFFFBF7EE) else Color(0xFF1C1B1F)
     val topBarBg = if (isPaper) Color(0xFFF3EBD8) else Color(0xFF1C1B1F)
@@ -71,20 +75,48 @@ fun GameScreen(
         }
     }
 
-    // Track active screen and trigger game loop only when GameScreen is visible
-    DisposableEffect(Unit) {
+    // Track active screen and lifecycle events (ON_PAUSE / ON_STOP auto-pauses the game loop!)
+    DisposableEffect(lifecycleOwner) {
         viewModel.isGameScreenActive = true
-        if (viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused && viewModel.paceMode != PaceMode.PUZZLE_STEP) {
+        if (viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused && !viewModel.isAnyModalOpen() && viewModel.paceMode != PaceMode.PUZZLE_STEP) {
             viewModel.startGameLoop()
         }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    viewModel.onAppBackgrounded()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (viewModel.isGameScreenActive && viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused && !viewModel.isAnyModalOpen() && viewModel.paceMode != PaceMode.PUZZLE_STEP) {
+                        viewModel.startGameLoop()
+                    }
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             viewModel.isGameScreenActive = false
             viewModel.pauseGameLoop()
         }
     }
 
-    LaunchedEffect(viewModel.currentMode, viewModel.isUserPaused, viewModel.paceMode) {
-        if (viewModel.isGameScreenActive && viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused && viewModel.paceMode != PaceMode.PUZZLE_STEP) {
+    LaunchedEffect(
+        viewModel.currentMode,
+        viewModel.isUserPaused,
+        viewModel.paceMode,
+        viewModel.showRiddleSpotlight,
+        viewModel.showEncyclopediaModal,
+        viewModel.showCustomWordCreatorModal,
+        viewModel.showDailyWordModal
+    ) {
+        if (viewModel.isGameScreenActive &&
+            viewModel.currentMode == GameMode.TETRIS &&
+            !viewModel.isUserPaused &&
+            !viewModel.isAnyModalOpen() &&
+            viewModel.paceMode != PaceMode.PUZZLE_STEP
+        ) {
             viewModel.startGameLoop()
         } else {
             viewModel.pauseGameLoop()
@@ -436,6 +468,7 @@ fun GameScreen(
             // Festive Particle Confetti Fireworks + Haptic Feedback when a Crossword Stencil line vanishes!
             ConfettiCelebrationOverlay(
                 triggerTick = viewModel.celebrationTriggerTick,
+                onConsumed = { viewModel.consumeCelebrationTrigger() },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -523,8 +556,8 @@ fun GameScreen(
                                         .padding(horizontal = 12.dp, vertical = 4.dp)
                                 ) {
                                     Text(
-                                        text = "↔ ${quest.category.ifBlank { if (viewModel.isRussian) "Семья" else "Family" }} • ${quest.word.length} " +
-                                            (if (viewModel.isRussian) "букв(ы)" else "letters"),
+                                        text = "↔ ${quest.category.ifBlank { if (viewModel.isRussian) "Семья" else "Family" }} • " +
+                                            (if (viewModel.isRussian) Dictionary.russianLettersPlural(quest.word.length) else "${quest.word.length} letters"),
                                         color = if (isPaper) Color(0xFF1B365D) else Color(0xFFD0BCFF),
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp
@@ -544,7 +577,7 @@ fun GameScreen(
                                     HorizontalDivider(color = Color(0xFFD97706).copy(alpha = 0.3f))
                                     Text(
                                         text = if (viewModel.isRussian) {
-                                            "↕ По вертикали (${secQuest.word.length} букв): ${secQuest.definition}"
+                                            "↕ По вертикали (${Dictionary.russianLettersPlural(secQuest.word.length)}): ${secQuest.definition}"
                                         } else {
                                             "↕ Down (${secQuest.word.length} letters): ${secQuest.definition}"
                                         },
@@ -684,13 +717,15 @@ fun GameScreen(
 
             // --- CROSSWORD GUESS MODAL DIALOG ---
             activeGuessingClue?.let { clue ->
+                val dialogBg = if (isPaper) Color(0xFFFBF7EE) else Color(0xFF2B2930)
+                val accentPrimary = if (isPaper) Color(0xFF1B365D) else Color(0xFFD0BCFF)
                 Dialog(onDismissRequest = { activeGuessingClue = null }) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp)
-                            .border(1.dp, Color(0xFFD0BCFF), RoundedCornerShape(16.dp)),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2B2930))
+                            .border(1.5.dp, accentPrimary, RoundedCornerShape(16.dp)),
+                        colors = CardDefaults.cardColors(containerColor = dialogBg)
                     ) {
                         Column(
                             modifier = Modifier.padding(20.dp),
@@ -700,7 +735,7 @@ fun GameScreen(
                             Text(
                                 text = if (viewModel.isRussian) "Разгадать Слово" else "Guess Word",
                                 style = MaterialTheme.typography.titleLarge.copy(
-                                    color = Color(0xFFD0BCFF),
+                                    color = accentPrimary,
                                     fontWeight = FontWeight.Bold
                                 )
                             )
@@ -709,12 +744,12 @@ fun GameScreen(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFD0BCFF).copy(alpha = 0.15f))
+                                        .background(accentPrimary.copy(alpha = 0.15f))
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
                                     Text(
-                                        text = "${clue.category} • ${clue.length} " + (if (viewModel.isRussian) "букв(ы)" else "letters"),
-                                        color = Color(0xFFD0BCFF),
+                                        text = "${clue.category} • " + (if (viewModel.isRussian) Dictionary.russianLettersPlural(clue.length) else "${clue.length} letters"),
+                                        color = accentPrimary,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
@@ -723,7 +758,7 @@ fun GameScreen(
 
                             Text(
                                 text = clue.clue,
-                                color = Color.White.copy(alpha = 0.9f),
+                                color = textPrimary,
                                 textAlign = TextAlign.Center,
                                 fontSize = 15.sp,
                                 modifier = Modifier.fillMaxWidth()
@@ -731,7 +766,7 @@ fun GameScreen(
 
                             Text(
                                 text = clue.getMaskedPreview(),
-                                color = Color(0xFFFFB74D),
+                                color = if (isPaper) Color(0xFFB45309) else Color(0xFFFFB74D),
                                 fontSize = 18.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.ExtraBold
@@ -742,12 +777,12 @@ fun GameScreen(
                                 onValueChange = { clueGuessInput = it.uppercase().trim() },
                                 label = { Text(if (viewModel.isRussian) "Ваш ответ" else "Your answer") },
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFFD0BCFF),
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
-                                    focusedLabelColor = Color(0xFFD0BCFF),
-                                    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
+                                    focusedBorderColor = accentPrimary,
+                                    unfocusedBorderColor = textPrimary.copy(alpha = 0.3f),
+                                    focusedLabelColor = accentPrimary,
+                                    unfocusedLabelColor = textPrimary.copy(alpha = 0.6f),
+                                    focusedTextColor = textPrimary,
+                                    unfocusedTextColor = textPrimary
                                 ),
                                 singleLine = true,
                                 modifier = Modifier
@@ -772,7 +807,7 @@ fun GameScreen(
                                 OutlinedButton(
                                     onClick = { activeGuessingClue = null },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = textPrimary)
                                 ) {
                                     Text(if (viewModel.isRussian) "Отмена" else "Cancel")
                                 }
@@ -786,8 +821,8 @@ fun GameScreen(
                                         .weight(1f)
                                         .testTag("clue_guess_submit_button"),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFD0BCFF),
-                                        contentColor = Color(0xFF381E72)
+                                        containerColor = accentPrimary,
+                                        contentColor = if (isPaper) Color.White else Color(0xFF381E72)
                                     )
                                 ) {
                                     Text(if (viewModel.isRussian) "Проверить" else "Submit")
@@ -800,13 +835,15 @@ fun GameScreen(
 
             // --- GAME OVER DIALOG ---
             if (showGameOverDialog) {
+                val dialogBg = if (isPaper) Color(0xFFFBF7EE) else Color(0xFF1C1B1F)
+                val accentPrimary = if (isPaper) Color(0xFF1B365D) else Color(0xFFD0BCFF)
                 Dialog(onDismissRequest = { }) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp)
-                            .border(2.dp, Color(0xFFD0BCFF), RoundedCornerShape(20.dp)),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1B1F))
+                            .border(2.dp, accentPrimary, RoundedCornerShape(20.dp)),
+                        colors = CardDefaults.cardColors(containerColor = dialogBg)
                     ) {
                         Column(
                             modifier = Modifier.padding(24.dp),
@@ -816,7 +853,7 @@ fun GameScreen(
                             Text(
                                 text = if (viewModel.isRussian) "ИГРА ОКОНЧЕНА" else "GAME OVER",
                                 style = MaterialTheme.typography.headlineMedium.copy(
-                                    color = Color(0xFFD0BCFF),
+                                    color = accentPrimary,
                                     fontWeight = FontWeight.Black,
                                     letterSpacing = 2.sp
                                 )
@@ -828,7 +865,7 @@ fun GameScreen(
                                 } else {
                                     "Final Score:"
                                 },
-                                color = Color.White.copy(alpha = 0.8f),
+                                color = textPrimary.copy(alpha = 0.85f),
                                 textAlign = TextAlign.Center,
                                 fontSize = 14.sp
                             )
@@ -836,7 +873,7 @@ fun GameScreen(
                             Text(
                                 text = "${viewModel.currentScore}",
                                 style = MaterialTheme.typography.displayMedium.copy(
-                                    color = Color(0xFFD0BCFF),
+                                    color = accentPrimary,
                                     fontWeight = FontWeight.Black
                                 )
                             )
@@ -846,10 +883,10 @@ fun GameScreen(
                                 onValueChange = { playerNameInput = it },
                                 label = { Text(if (viewModel.isRussian) "Имя игрока" else "Player Name") },
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFFD0BCFF),
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
+                                    focusedBorderColor = accentPrimary,
+                                    unfocusedBorderColor = textPrimary.copy(alpha = 0.35f),
+                                    focusedTextColor = textPrimary,
+                                    unfocusedTextColor = textPrimary
                                 ),
                                 singleLine = true,
                                 modifier = Modifier
@@ -869,8 +906,8 @@ fun GameScreen(
                                     .height(50.dp)
                                     .testTag("save_score_button"),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFD0BCFF),
-                                    contentColor = Color(0xFF381E72)
+                                    containerColor = accentPrimary,
+                                    contentColor = if (isPaper) Color.White else Color(0xFF381E72)
                                 ),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
@@ -1140,14 +1177,14 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     ),
                                     border = BorderStroke(1.dp, accentGold),
                                     shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(28.dp)
+                                        .height(34.dp)
                                         .testTag("speak_riddle_button")
                                 ) {
                                     Text(
                                         text = "🔊",
-                                        fontSize = 11.sp
+                                        fontSize = 12.sp
                                     )
                                 }
 
@@ -1160,15 +1197,15 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     ),
                                     border = BorderStroke(1.dp, accentGold),
                                     shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(28.dp)
+                                        .height(34.dp)
                                         .testTag("stencil_hint_button")
                                 ) {
                                     Text(
                                         text = "💡?",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp
                                     )
                                 }
 
@@ -1181,15 +1218,15 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     ),
                                     border = BorderStroke(1.dp, Color(0xFF00C853)),
                                     shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(28.dp)
+                                        .height(34.dp)
                                         .testTag("magnet_helper_button")
                                 ) {
                                     Text(
                                         text = if (viewModel.isRussian) "🧲 Магнит" else "🧲 Magnet",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp
                                     )
                                 }
 
@@ -1199,14 +1236,14 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     enabled = viewModel.canUndo,
                                     shape = RoundedCornerShape(8.dp),
                                     border = BorderStroke(1.dp, borderCol),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(28.dp)
+                                        .height(34.dp)
                                         .testTag("undo_move_button")
                                 ) {
                                     Text(
                                         text = "↩️",
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp
                                     )
                                 }
 
@@ -1215,14 +1252,14 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     onClick = { viewModel.skipStencilPuzzle() },
                                     shape = RoundedCornerShape(8.dp),
                                     border = BorderStroke(1.dp, borderCol),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(28.dp)
+                                        .height(34.dp)
                                         .testTag("skip_stencil_button")
                                 ) {
                                     Text(
                                         text = "🔄",
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp
                                     )
                                 }
                             }
@@ -1305,84 +1342,92 @@ fun BoardView(
     val gridLineColor = if (isPaper) Color(0xFF8D6E63).copy(alpha = 0.22f) else Color(0xFF938F99).copy(alpha = 0.10f)
     val boardBorderColor = if (isPaper) Color(0xFFBCAAA4) else Color(0xFF49454F)
 
-    key(viewModel.boardStateTick, viewModel.isUserPaused, viewModel.isLargeFontMode, viewModel.isPaperTheme) {
-        val board = viewModel.engine.board
-        val rows = viewModel.engine.rows
-        val cols = viewModel.engine.cols
-        val activePiece = viewModel.activePiece
+    // IMPORTANT (fixes 2.10): Do NOT wrap the pointerInput Box in key(viewModel.boardStateTick)!
+    // Reading boardStateTick inside the composition updates the grid cells while keeping the pointerInput
+    // drag gesture alive across multi-cell swipes!
+    val currentTick = viewModel.boardStateTick
+    val board = viewModel.engine.board
+    val rows = viewModel.engine.rows
+    val cols = viewModel.engine.cols
+    val activePiece = viewModel.activePiece
 
-        val activePointsMap = remember(activePiece) {
-            activePiece?.let { piece ->
-                val points = piece.getPoints()
-                points.mapIndexed { idx, point ->
-                    point to (piece.letters.getOrNull(idx) ?: ' ')
-                }.toMap()
-            } ?: emptyMap()
+    val activePointsMap = remember(activePiece, currentTick) {
+        activePiece?.let { piece ->
+            val points = piece.getPoints()
+            points.mapIndexed { idx, point ->
+                point to (piece.letters.getOrNull(idx) ?: ' ')
+            }.toMap()
+        } ?: emptyMap()
+    }
+
+    // Ghost piece landing shadow coordinates
+    val ghostPointsSet = remember(activePiece, currentTick) {
+        if (viewModel.currentMode == GameMode.TETRIS && activePiece != null) {
+            viewModel.engine.getGhostPiecePoints().toSet()
+        } else {
+            emptySet()
         }
+    }
 
-        // Ghost piece landing shadow coordinates
-        val ghostPointsSet = remember(activePiece, viewModel.boardStateTick) {
-            if (viewModel.currentMode == GameMode.TETRIS && activePiece != null) {
-                viewModel.engine.getGhostPiecePoints().toSet()
-            } else {
-                emptySet()
-            }
-        }
+    // Crossword Stencil Slots map (x,y -> StencilSlot)
+    val stencilSlotsMap = remember(viewModel.stencilSlots, currentTick) {
+        viewModel.stencilSlots.associateBy { GridPoint(it.x, it.y) }
+    }
 
-        // Crossword Stencil Slots map (x,y -> StencilSlot)
-        val stencilSlotsMap = remember(viewModel.stencilSlots, viewModel.boardStateTick) {
-            viewModel.stencilSlots.associateBy { GridPoint(it.x, it.y) }
-        }
+    // Word Radar highlighted coordinates in Crossword Mode
+    val radarPointsSet = remember(viewModel.crosswordClues, currentTick) {
+        viewModel.crosswordClues
+            .filter { it.radarActive && !it.isSolved }
+            .flatMap { it.getCoordinates() }
+            .toSet()
+    }
 
-        // Word Radar highlighted coordinates in Crossword Mode
-        val radarPointsSet = remember(viewModel.crosswordClues, viewModel.boardStateTick) {
-            viewModel.crosswordClues
-                .filter { it.radarActive && !it.isSolved }
-                .flatMap { it.getCoordinates() }
-                .toSet()
-        }
+    var accumulatedDragX by remember { mutableFloatStateOf(0f) }
+    var accumulatedDragY by remember { mutableFloatStateOf(0f) }
 
-        var accumulatedDragX by remember { mutableFloatStateOf(0f) }
-        var accumulatedDragY by remember { mutableFloatStateOf(0f) }
-
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxHeight()
-                .aspectRatio(10f / 15f)
-                .pointerInput(viewModel.currentMode, viewModel.isUserPaused) {
-                    if (viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused) {
-                        detectTapGestures(
-                            onTap = { viewModel.rotatePiece() },
-                            onDoubleTap = { viewModel.shiftPieceLetters() }
-                        )
-                    }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxHeight()
+            .aspectRatio(10f / 15f)
+            .pointerInput(viewModel.currentMode, viewModel.isUserPaused) {
+                if (viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused) {
+                    detectTapGestures(
+                        onTap = { viewModel.rotatePiece() },
+                        onDoubleTap = { viewModel.shiftPieceLetters() }
+                    )
                 }
-                .pointerInput(viewModel.currentMode, viewModel.isUserPaused) {
-                    if (viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused) {
-                        detectDragGestures(
-                            onDragStart = {
-                                accumulatedDragX = 0f
-                                accumulatedDragY = 0f
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                accumulatedDragX += dragAmount.x
-                                accumulatedDragY += dragAmount.y
-                                val stepThreshold = 42f
-                                if (abs(accumulatedDragX) > stepThreshold) {
-                                    if (accumulatedDragX > 0) viewModel.moveRight() else viewModel.moveLeft()
-                                    accumulatedDragX = 0f
-                                }
-                                if (accumulatedDragY > stepThreshold * 1.4f) {
-                                    viewModel.moveDown()
-                                    accumulatedDragY = 0f
+            }
+            .pointerInput(viewModel.currentMode, viewModel.isUserPaused) {
+                if (viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused) {
+                    detectDragGestures(
+                        onDragStart = {
+                            accumulatedDragX = 0f
+                            accumulatedDragY = 0f
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            accumulatedDragX += dragAmount.x
+                            accumulatedDragY += dragAmount.y
+                            val stepThreshold = 42f
+                            while (abs(accumulatedDragX) >= stepThreshold) {
+                                if (accumulatedDragX > 0) {
+                                    viewModel.moveRight()
+                                    accumulatedDragX -= stepThreshold
+                                } else {
+                                    viewModel.moveLeft()
+                                    accumulatedDragX += stepThreshold
                                 }
                             }
-                        )
-                    }
+                            while (accumulatedDragY >= stepThreshold * 1.3f) {
+                                viewModel.moveDown()
+                                accumulatedDragY -= stepThreshold * 1.3f
+                            }
+                        }
+                    )
                 }
-        ) {
+            }
+    ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1637,7 +1682,6 @@ fun BoardView(
                 }
             }
         }
-    }
 }
 
 @Composable
@@ -1937,12 +1981,19 @@ fun LiveCrosswordPanel(
     viewModel: GameViewModel,
     onSelectClueToGuess: (CrosswordClue) -> Unit
 ) {
+    val isPaper = viewModel.isPaperTheme
+    val panelBg = if (isPaper) Color(0xFFFFFDF9) else Color(0xFF2B2930)
+    val cardBg = if (isPaper) Color(0xFFF3EBD8) else Color(0xFF1C1B1F)
+    val borderCol = if (isPaper) Color(0xFFD7CCC8) else Color(0xFF49454F)
+    val textPrimary = if (isPaper) Color(0xFF2C1E14) else Color.White
+    val accentPrimary = if (isPaper) Color(0xFF1B365D) else Color(0xFFD0BCFF)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF2B2930))
-            .border(1.dp, Color(0xFF49454F), RoundedCornerShape(20.dp))
+            .background(panelBg)
+            .border(1.dp, borderCol, RoundedCornerShape(20.dp))
             .padding(10.dp)
     ) {
         Row(
@@ -1954,7 +2005,7 @@ fun LiveCrosswordPanel(
         ) {
             Text(
                 text = if (viewModel.isRussian) "🧩 КРОССВОРД НА ПОЛЕ:" else "🧩 BOARD CROSSWORD:",
-                color = Color(0xFFD0BCFF),
+                color = accentPrimary,
                 fontWeight = FontWeight.Bold,
                 fontSize = 12.sp
             )
@@ -1964,7 +2015,7 @@ fun LiveCrosswordPanel(
                 } else {
                     "Free Hints: ${viewModel.freeHintCharges}"
                 },
-                color = Color(0xFF81C784),
+                color = if (isPaper) Color(0xFF2E7D32) else Color(0xFF81C784),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp
             )
@@ -1985,12 +2036,16 @@ fun LiveCrosswordPanel(
                             color = when {
                                 clue.isSolved -> Color(0xFF81C784)
                                 clue.radarActive -> Color(0xFF00E676)
-                                else -> Color(0xFF49454F)
+                                else -> borderCol
                             },
                             shape = RoundedCornerShape(12.dp)
                         ),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (clue.isSolved) Color(0xFF10281C) else Color(0xFF1C1B1F)
+                        containerColor = if (clue.isSolved) {
+                            if (isPaper) Color(0xFFE8F5E9) else Color(0xFF10281C)
+                        } else {
+                            cardBg
+                        }
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -2008,12 +2063,12 @@ fun LiveCrosswordPanel(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFFD0BCFF).copy(alpha = 0.15f))
+                                    .background(accentPrimary.copy(alpha = 0.15f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "${clue.category.ifBlank { if (viewModel.isRussian) "Слово" else "Word" }} • ${clue.length} б.",
-                                    color = Color(0xFFD0BCFF),
+                                    color = accentPrimary,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -2021,7 +2076,7 @@ fun LiveCrosswordPanel(
 
                             Text(
                                 text = if (clue.isSolved) "${clue.word} ✅" else clue.getMaskedPreview(),
-                                color = if (clue.isSolved) Color(0xFF81C784) else Color(0xFFFFB74D),
+                                color = if (clue.isSolved) (if (isPaper) Color(0xFF2E7D32) else Color(0xFF81C784)) else (if (isPaper) Color(0xFFB45309) else Color(0xFFFFB74D)),
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 13.sp
@@ -2030,7 +2085,7 @@ fun LiveCrosswordPanel(
 
                         Text(
                             text = clue.clue,
-                            color = Color.White.copy(alpha = if (clue.isSolved) 0.6f else 0.92f),
+                            color = textPrimary.copy(alpha = if (clue.isSolved) 0.65f else 0.95f),
                             fontSize = if (viewModel.isLargeFontMode) 14.sp else 12.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -2042,71 +2097,67 @@ fun LiveCrosswordPanel(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Voice Readout
                                 OutlinedButton(
                                     onClick = { viewModel.speakText(clue.clue) },
                                     shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFFFD54F).copy(alpha = 0.5f))
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(34.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.6f))
                                 ) {
                                     Text(
                                         text = "🔊",
-                                        fontSize = 9.sp
+                                        fontSize = 11.sp
                                     )
                                 }
 
-                                // Hint 1: Open 1 letter
                                 OutlinedButton(
                                     onClick = { viewModel.revealOneLetterHint(clue.id) },
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF81C784).copy(alpha = 0.5f))
+                                    modifier = Modifier.height(34.dp),
+                                    border = BorderStroke(1.dp, Color(0xFF2E7D32).copy(alpha = 0.6f))
                                 ) {
                                     Text(
                                         text = if (viewModel.freeHintCharges > 0) "💡+1Б (0)" else "💡+1Б (-15)",
-                                        color = Color(0xFF81C784),
-                                        fontSize = 9.sp,
+                                        color = if (isPaper) Color(0xFF2E7D32) else Color(0xFF81C784),
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
 
-                                // Hint 2: Word Radar on board
                                 OutlinedButton(
                                     onClick = { viewModel.toggleWordRadar(clue.id) },
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp),
+                                    modifier = Modifier.height(34.dp),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (clue.radarActive) Color(0xFF00E676) else Color(0xFFD0BCFF).copy(alpha = 0.5f)
+                                        if (clue.radarActive) Color(0xFF00E676) else accentPrimary.copy(alpha = 0.6f)
                                     )
                                 ) {
                                     Text(
                                         text = if (viewModel.isRussian) "📡 Радар" else "📡 Radar",
-                                        color = if (clue.radarActive) Color(0xFF00E676) else Color(0xFFD0BCFF),
-                                        fontSize = 9.sp,
+                                        color = if (clue.radarActive) Color(0xFF00C853) else accentPrimary,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
 
                                 Spacer(modifier = Modifier.weight(1f))
 
-                                // Guess Answer Button
                                 Button(
                                     onClick = { onSelectClueToGuess(clue) },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFD0BCFF),
-                                        contentColor = Color(0xFF381E72)
+                                        containerColor = accentPrimary,
+                                        contentColor = if (isPaper) Color.White else Color(0xFF381E72)
                                     ),
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
+                                    modifier = Modifier.height(34.dp)
                                 ) {
                                     Text(
                                         text = if (viewModel.isRussian) "Ввести" else "Guess",
-                                        fontSize = 10.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -2123,11 +2174,11 @@ fun LiveCrosswordPanel(
             onClick = { viewModel.resumeTetrisAfterCrossword() },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp)
+                .height(46.dp)
                 .testTag("resume_tetris_button"),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFD0BCFF),
-                contentColor = Color(0xFF381E72)
+                containerColor = accentPrimary,
+                contentColor = if (isPaper) Color.White else Color(0xFF381E72)
             ),
             shape = RoundedCornerShape(12.dp)
         ) {

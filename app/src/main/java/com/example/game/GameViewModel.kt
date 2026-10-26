@@ -110,15 +110,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun speakText(text: String) {
         if (text.isBlank()) return
+        var spokenByEngine = false
         runCatching {
-            if (isTtsReady && tts != null) {
+            val engineTts = tts
+            if (isTtsReady && engineTts != null) {
                 val locale = if (isRussian) Locale.forLanguageTag("ru-RU") else Locale.US
-                tts?.language = locale
-                tts?.setSpeechRate(0.92f)
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tetricross_tts")
+                val langStatus = engineTts.setLanguage(locale)
+                if (langStatus != TextToSpeech.LANG_MISSING_DATA && langStatus != TextToSpeech.LANG_NOT_SUPPORTED) {
+                    engineTts.setSpeechRate(0.92f)
+                    val speakRes = engineTts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tetricross_tts")
+                    spokenByEngine = (speakRes == TextToSpeech.SUCCESS)
+                }
             }
         }
-        showToast(if (isRussian) "🔊 Озвучивание: $text" else "🔊 Speaking: $text")
+        if (spokenByEngine) {
+            showToast(if (isRussian) "🔊 Озвучивание: $text" else "🔊 Speaking: $text")
+        } else {
+            showToast(if (isRussian) "💬 Загадка: $text" else "💬 Riddle: $text")
+        }
     }
 
     /**
@@ -129,9 +138,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val secondary = if (isCrossedStencilMode) secondaryQuestWord else null
         val speech = if (isRussian) {
             buildString {
-                append("Загадка по горизонтали, ${primary.word.length} буквы: ${primary.definition}.")
+                append("Загадка по горизонтали, ${Dictionary.russianLettersPlural(primary.word.length)}: ${primary.definition}.")
                 if (secondary != null) {
-                    append(" Загадка по вертикали, ${secondary.word.length} буквы: ${secondary.definition}.")
+                    append(" Загадка по вертикали, ${Dictionary.russianLettersPlural(secondary.word.length)}: ${secondary.definition}.")
                 }
             }
         } else {
@@ -143,6 +152,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         speakText(speech)
+    }
+
+    fun consumeCelebrationTrigger() {
+        celebrationTriggerTick = 0
+    }
+
+    fun isAnyModalOpen(): Boolean {
+        return showRiddleSpotlight || showEncyclopediaModal || showCustomWordCreatorModal || showDailyWordModal
+    }
+
+    fun onAppBackgrounded() {
+        pauseGameLoop()
+        saveGameProgress()
     }
 
     /**
@@ -160,7 +182,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         isLargeFontMode = engine.isLargeFontMode
         isPaperTheme = engine.isPaperTheme
         isCrossedStencilMode = engine.isCrossedStencilMode
-        dailyWordCompletedToday = engine.dailyWordCompletedToday
+        dailyWordCompletedToday = engine.isDailyWordCompletedForToday()
         canUndo = engine.undoStack.isNotEmpty()
         isRussian = engine.isRussian
         activePiece = engine.activePiece
@@ -389,9 +411,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     isRussian = isRussian
                 )
             )
-            repository.insertUnlockedWord(customDef.word)
         }
-        unlockedWordsSet = unlockedWordsSet + customDef.word
         engine.startSpecificWordOnBoard(customDef, isDaily = false)
         syncStatesFromEngine()
         saveGameProgress()
@@ -404,18 +424,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Deletes a custom family word from Dictionary and persistent SQLite storage.
+     */
+    fun deleteCustomFamilyWord(word: String) {
+        if (Dictionary.removeCustomFamilyWord(word)) {
+            viewModelScope.launch {
+                repository.deleteCustomFamilyWord(word)
+            }
+            boardStateTick++
+            showToast(
+                if (isRussian) "🗑️ Семейное слово «$word» удалено"
+                else "🗑️ Custom word \"$word\" removed"
+            )
+        }
+    }
+
+    /**
      * Starts the special Daily Word of the Day ("☀️ Слово Дня") on the board!
+     * Strictly limited to once per calendar day (fixes 2.3).
      */
     fun startDailyWordChallenge() {
+        if (engine.isDailyWordCompletedForToday()) {
+            showDailyWordModal = false
+            showToast(
+                if (isRussian) "✅ Слово Дня на сегодня уже разгадано! Возвращайтесь завтра за новым словом!"
+                else "✅ Today's Word of the Day is already solved! Come back tomorrow!"
+            )
+            return
+        }
         val dailyDef = Dictionary.getDailyWord(isRussian)
-        engine.startSpecificWordOnBoard(dailyDef, isDaily = true)
-        syncStatesFromEngine()
-        saveGameProgress()
-        showDailyWordModal = false
-        showToast(
-            if (isRussian) "☀️ Слово Дня размещено на трафарете! Разгадайте его для особого бонуса +500 очков!"
-            else "☀️ Word of the Day placed on the board! Solve it for +500 bonus points!"
-        )
+        if (engine.startSpecificWordOnBoard(dailyDef, isDaily = true)) {
+            syncStatesFromEngine()
+            saveGameProgress()
+            showDailyWordModal = false
+            showToast(
+                if (isRussian) "☀️ Слово Дня размещено на трафарете! Разгадайте его для особого бонуса +500 очков!"
+                else "☀️ Word of the Day placed on the board! Solve it for +500 bonus points!"
+            )
+        }
     }
 
     /**
@@ -587,7 +633,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      * Tetris Game Loop controller — respects isGameScreenActive, PUZZLE_STEP (no auto-drop), RELAXED (2600ms), and ARCADE
      */
     fun startGameLoop() {
-        if (!isGameScreenActive || isPlaying || isUserPaused) return
+        if (!isGameScreenActive || isPlaying || isUserPaused || isAnyModalOpen()) return
         if (engine.paceMode == PaceMode.PUZZLE_STEP) {
             isPlaying = false
             gameLoopJob?.cancel()
@@ -597,7 +643,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         isPlaying = true
         gameLoopJob = viewModelScope.launch {
-            while (isGameScreenActive && isPlaying && !isUserPaused && engine.mode == GameMode.TETRIS && engine.paceMode != PaceMode.PUZZLE_STEP) {
+            while (isGameScreenActive && isPlaying && !isUserPaused && !isAnyModalOpen() && engine.mode == GameMode.TETRIS && engine.paceMode != PaceMode.PUZZLE_STEP) {
                 val delayTime = when (engine.paceMode) {
                     PaceMode.PUZZLE_STEP -> 3000L
                     PaceMode.RELAXED -> 2600L
@@ -605,7 +651,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 delay(delayTime)
 
-                if (isGameScreenActive && engine.mode == GameMode.TETRIS && isPlaying && !isUserPaused && engine.paceMode != PaceMode.PUZZLE_STEP) {
+                if (isGameScreenActive && engine.mode == GameMode.TETRIS && isPlaying && !isUserPaused && !isAnyModalOpen() && engine.paceMode != PaceMode.PUZZLE_STEP) {
                     val moved = engine.movePiece(0, 1)
                     if (!moved) {
                         engine.lockPiece()
@@ -614,7 +660,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     syncStatesFromEngine()
                 }
             }
-            if (engine.mode != GameMode.TETRIS) {
+            if (engine.mode != GameMode.TETRIS || isAnyModalOpen()) {
                 isPlaying = false
             }
         }
@@ -771,12 +817,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         val success = engine.addGiftWord(text)
         if (success) {
+            val pts = engine.lastGiftWordPointsAwarded
             syncStatesFromEngine()
             saveGameProgress()
-            showToast(
-                if (isRussian) "🎁 Слово в подарок! +${text.length * 25} очков. Буквы добавлены в очередь."
-                else "🎁 Gift word queued! +${text.length * 25} pts. Letters loaded."
-            )
+            if (pts > 0) {
+                showToast(
+                    if (isRussian) "🎁 Слово в подарок! +$pts очков. Буквы добавлены в очередь."
+                    else "🎁 Gift word queued! +$pts pts. Letters loaded."
+                )
+            } else {
+                showToast(
+                    if (isRussian) "🎁 Буквы слова «$text» добавлены в очередь (очки уже получены в этой партии)."
+                    else "🎁 Letters of \"$text\" queued (points already claimed this game)."
+                )
+            }
         } else {
             showToast(
                 if (isRussian) "Слово «$text» не найдено в словаре!"

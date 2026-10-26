@@ -39,6 +39,14 @@ fun LeaderboardScreen(
     BackHandler { onNavigateBack() }
     val topScores by viewModel.topScores.collectAsState()
     val isRussian = viewModel.isRussian
+    val isPaper = viewModel.isPaperTheme
+    val screenBg = if (isPaper) Color(0xFFFBF7EE) else Color(0xFF1C1B1F)
+    val topBarBg = if (isPaper) Color(0xFFF3EBD8) else Color(0xFF1C1B1F)
+    val cardBg = if (isPaper) Color(0xFFFFFDF9) else Color(0xFF2B2930)
+    val borderCol = if (isPaper) Color(0xFFD7CCC8) else Color(0xFF49454F)
+    val textPrimary = if (isPaper) Color(0xFF2C1E14) else Color(0xFFE6E1E5)
+    val textSecondary = if (isPaper) Color(0xFF5D4037) else Color(0xFFCAC4D0)
+    val accentPrimary = if (isPaper) Color(0xFF1B365D) else Color(0xFFD0BCFF)
 
     Scaffold(
         topBar = {
@@ -47,7 +55,7 @@ fun LeaderboardScreen(
                     Text(
                         text = if (isRussian) "Таблица рекордов" else "High Scores",
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFE6E1E5)
+                        color = textPrimary
                     )
                 },
                 navigationIcon = {
@@ -58,7 +66,7 @@ fun LeaderboardScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = Color(0xFFE6E1E5)
+                            tint = textPrimary
                         )
                     }
                 },
@@ -71,14 +79,14 @@ fun LeaderboardScreen(
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = "Clear all scores",
-                                tint = Color(0xFFF2B8B5)
+                                tint = if (isPaper) Color(0xFFC62828) else Color(0xFFF2B8B5)
                             )
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1C1B1F),
-                    titleContentColor = Color(0xFFE6E1E5)
+                    containerColor = topBarBg,
+                    titleContentColor = textPrimary
                 )
             )
         }
@@ -86,7 +94,7 @@ fun LeaderboardScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF1C1B1F))
+                .background(screenBg)
                 .padding(innerPadding)
         ) {
             Column(
@@ -107,13 +115,13 @@ fun LeaderboardScreen(
                                 imageVector = Icons.Default.Star,
                                 contentDescription = null,
                                 modifier = Modifier.size(64.dp),
-                                tint = Color.White.copy(alpha = 0.12f)
+                                tint = textSecondary.copy(alpha = 0.25f)
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = if (isRussian) "Рекордов пока нет.\nСыграйте игру чтобы установить рекорд!" else "No scores yet.\nPlay a game to make history!",
                                 textAlign = TextAlign.Center,
-                                color = Color(0xFFCAC4D0),
+                                color = textSecondary,
                                 fontSize = 16.sp
                             )
                         }
@@ -129,10 +137,10 @@ fun LeaderboardScreen(
                         itemsIndexed(topScores) { index, item ->
                             val rank = index + 1
                             val rankColor = when (rank) {
-                                1 -> Color(0xFFFFF176) // Gold
-                                2 -> Color(0xFFCFD8DC) // Silver
-                                3 -> Color(0xFFFFB74D) // Bronze
-                                else -> Color(0xFFCAC4D0).copy(alpha = 0.8f)
+                                1 -> if (isPaper) Color(0xFFB45309) else Color(0xFFFFF176) // Gold
+                                2 -> if (isPaper) Color(0xFF455A64) else Color(0xFFCFD8DC) // Silver
+                                3 -> if (isPaper) Color(0xFFD84315) else Color(0xFFFFB74D) // Bronze
+                                else -> textSecondary.copy(alpha = 0.8f)
                             }
 
                             Card(
@@ -141,11 +149,11 @@ fun LeaderboardScreen(
                                     .fillMaxWidth()
                                     .border(
                                         width = if (rank <= 3) 1.5.dp else 1.dp,
-                                        color = if (rank <= 3) rankColor.copy(alpha = 0.5f) else Color(0xFF49454F),
+                                        color = if (rank <= 3) rankColor.copy(alpha = 0.5f) else borderCol,
                                         shape = RoundedCornerShape(12.dp)
                                     ),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = Color(0xFF2B2930)
+                                    containerColor = cardBg
                                 )
                             ) {
                                 Row(
@@ -159,7 +167,6 @@ fun LeaderboardScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        // Rank visual indicator
                                         Box(
                                             modifier = Modifier
                                                 .size(36.dp)
@@ -180,7 +187,7 @@ fun LeaderboardScreen(
                                         Column {
                                             Text(
                                                 text = item.playerName,
-                                                color = Color(0xFFE6E1E5),
+                                                color = textPrimary,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 16.sp
                                             )
@@ -194,7 +201,7 @@ fun LeaderboardScreen(
                                             }
                                             Text(
                                                 text = dateFormatted,
-                                                color = Color(0xFFCAC4D0),
+                                                color = textSecondary,
                                                 fontSize = 12.sp
                                             )
                                         }
@@ -202,7 +209,7 @@ fun LeaderboardScreen(
 
                                     Text(
                                         text = "${item.score}",
-                                        color = Color(0xFFD0BCFF),
+                                        color = accentPrimary,
                                         fontWeight = FontWeight.Black,
                                         fontSize = 20.sp
                                     )
