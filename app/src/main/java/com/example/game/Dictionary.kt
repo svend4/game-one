@@ -54,18 +54,11 @@ object Dictionary {
             "Румяный круглый блин издавна символизирует весеннее тёплое солнце и пробуждение природы."
         ),
         WordDefinition(
-            "МЁД",
-            "Сладкий янтарный подарок трудолюбивых пчёл к чаю",
-            "Кулинария",
-            WordTheme.HOME_COOKING,
-            "Чтобы собрать всего одну баночку цветочного мёда, пчёлам нужно облететь несколько миллионов лесных и луговых цветов!"
-        ),
-        WordDefinition(
             "МЕД",
             "Сладкий янтарный подарок трудолюбивых пчёл к чаю",
             "Кулинария",
             WordTheme.HOME_COOKING,
-            "Натуральный мёд — удивительный продукт природы, который может храниться десятилетиями и не терять своих полезных свойств."
+            "Чтобы собрать всего одну баночку цветочного мёда, пчёлам нужно облететь несколько миллионов лесных и луговых цветов!"
         ),
         WordDefinition(
             "ХЛЕБ",
@@ -175,18 +168,11 @@ object Dictionary {
             "Мурлыканье домашнего кота звучит на частоте, которая помогает человеку успокоиться и снять усталость."
         ),
         WordDefinition(
-            "ПЁС",
-            "Самый верный четвероногий друг человека, радостно виляющий хвостом",
-            "Животные",
-            WordTheme.NATURE_ANIMALS,
-            "Собаки умеют понимать до 200 человеческих слов и безошибочно чувствуют настроение своих хозяев!"
-        ),
-        WordDefinition(
             "ПЕС",
             "Самый верный четвероногий друг человека, радостно виляющий хвостом",
             "Животные",
             WordTheme.NATURE_ANIMALS,
-            "Отпечаток носа каждой собаки так же уникален, как отпечатки пальцев у человека."
+            "Собаки умеют понимать до 200 человеческих слов и безошибочно чувствуют настроение своих хозяев!"
         ),
         WordDefinition(
             "ЗАЯЦ",
@@ -741,19 +727,24 @@ object Dictionary {
         return findFirstMatchingDefinition(word, isRussian) != null
     }
 
+    fun normalizeYo(input: String): String {
+        return input.uppercase().trim().replace('Ё', 'Е')
+    }
+
     /**
      * Finds the first matching WordDefinition for a string that may contain '★' wildcards.
      */
     fun findFirstMatchingDefinition(pattern: String, isRussian: Boolean): WordDefinition? {
-        val clean = pattern.uppercase().trim()
+        val clean = normalizeYo(pattern)
         if (clean.length < 3) return null
         val list = getDefinitionsForLanguage(isRussian)
         if (!clean.contains(WILDCARD_CHAR)) {
-            return list.firstOrNull { it.word == clean }
+            return list.firstOrNull { normalizeYo(it.word) == clean }
         }
         return list.firstOrNull { def ->
-            def.word.length == clean.length && def.word.indices.all { idx ->
-                clean[idx] == WILDCARD_CHAR || clean[idx] == def.word[idx]
+            val defWord = normalizeYo(def.word)
+            defWord.length == clean.length && defWord.indices.all { idx ->
+                clean[idx] == WILDCARD_CHAR || clean[idx] == defWord[idx]
             }
         }
     }

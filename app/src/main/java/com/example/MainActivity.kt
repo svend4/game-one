@@ -7,7 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 // Shared view model to retain progress or trigger operations
                 val gameViewModel: GameViewModel = viewModel()
-                var currentScreen by remember { mutableStateOf("MENU") }
+                var currentScreen by rememberSaveable { mutableStateOf("MENU") }
 
                 when (currentScreen) {
                     "MENU" -> {

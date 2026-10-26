@@ -4,14 +4,18 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class GameDatabase private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "tetricross_database", null, 4) {
 
     private val scoresFlow = MutableStateFlow<List<HighScoreEntity>>(emptyList())
+    private val dbScope = CoroutineScope(Dispatchers.IO)
 
     private val daoImpl = object : GameDao {
         override fun getTopScores(): Flow<List<HighScoreEntity>> = scoresFlow.asStateFlow()
@@ -156,7 +160,9 @@ class GameDatabase private constructor(context: Context) :
     }
 
     init {
-        refreshScores()
+        dbScope.launch {
+            refreshScores()
+        }
     }
 
     override fun onCreate(db: SQLiteDatabase) {

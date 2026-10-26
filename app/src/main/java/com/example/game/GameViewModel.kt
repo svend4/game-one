@@ -66,8 +66,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var crosswordClues = mutableListOf<CrosswordClue>()
     var boardStateTick by mutableIntStateOf(0) // incremented to force recompose on array updates
 
-    // Explicit User Pause State
+    // Explicit User Pause State & Active Screen tracking (prevents background loop in Menu!)
     var isUserPaused by mutableStateOf(false)
+    var isGameScreenActive by mutableStateOf(false)
 
     // Input errors or tips
     var toastMessage by mutableStateOf<String?>(null)
@@ -111,7 +112,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (text.isBlank()) return
         runCatching {
             if (isTtsReady && tts != null) {
-                val locale = if (isRussian) Locale("ru", "RU") else Locale.US
+                val locale = if (isRussian) Locale.forLanguageTag("ru-RU") else Locale.US
                 tts?.language = locale
                 tts?.setSpeechRate(0.92f)
                 tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tetricross_tts")
@@ -145,7 +146,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Synergizes local observable compose states with current engine status
+     * Synchronizes observable Compose states with current engine status
      */
     fun syncStatesFromEngine() {
         currentScore = engine.score
@@ -190,18 +191,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         engine.lastResonanceWord?.let { resonated ->
+            val earned = engine.lastEarnedBonus
             celebrationTriggerTick++
             if (engine.lastDailyWordJustSolved) {
                 engine.lastDailyWordJustSolved = false
                 showDailyWordModal = true
                 showToast(
-                    if (isRussian) "☀️ СЛОВО ДНЯ «$resonated» РАЗГАДАНО! +500 очков и доброе пожелание семье!"
-                    else "☀️ WORD OF THE DAY \"$resonated\" SOLVED! +500 pts & a warm family wish!"
+                    if (isRussian) "☀️ СЛОВО ДНЯ «$resonated» РАЗГАДАНО! +$earned очков и доброе пожелание семье!"
+                    else "☀️ WORD OF THE DAY \"$resonated\" SOLVED! +$earned pts & a warm family wish!"
                 )
             } else {
                 showToast(
-                    if (isRussian) "🎉 СЛОВО «$resonated» СОБРАНО! Салют и очистка линии! Открыто в Альбоме слов!"
-                    else "🎉 WORD \"$resonated\" COMPLETED! Line vanished & unlocked in Word Album!"
+                    if (isRussian) "🎉 СЛОВО «$resonated» СОБРАНО! +$earned очков! Открыто в Альбоме слов!"
+                    else "🎉 WORD \"$resonated\" COMPLETED! +$earned pts & unlocked in Word Album!"
                 )
             }
             engine.lastResonanceWord = null
@@ -237,7 +239,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 if (savedUnlocked.isNotEmpty()) {
                     unlockedWordsSet = savedUnlocked
                 } else {
-                    // Seed with 2 starter words so the Encyclopedia Album is immediately welcoming!
                     val starters = setOf("ДОМ", "МАМА", "HOME", "MAMA")
                     unlockedWordsSet = starters
                     starters.forEach { repository.insertUnlockedWord(it) }
@@ -282,6 +283,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Finishes the current game session at any time and opens the High Score save modal.
+     */
+    fun finishAndSaveScore() {
+        isUserPaused = false
+        pauseGameLoop()
+        engine.finishGameAndTriggerGameOver()
+        syncStatesFromEngine()
+    }
+
+    /**
      * Undo last move ("↩️ Отменить ход") for seniors & kids
      */
     fun undoMove() {
@@ -297,6 +308,33 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 if (isRussian) "Нет предыдущего хода для отмены"
                 else "No previous move to undo"
             )
+        }
+    }
+
+    /**
+     * Reveals the hidden '?' letter inside the next open golden stencil slot on the board.
+     */
+    fun revealStencilHint() {
+        if (engine.mode == GameMode.TETRIS && !isUserPaused) {
+            val usedFree = engine.freeHintCharges > 0
+            if (engine.revealStencilSlotLetterHint()) {
+                syncStatesFromEngine()
+                saveGameProgress()
+                showToast(
+                    if (isRussian) {
+                        if (usedFree) "💡 Буква в золотой ячейке открыта (бесплатный заряд)!"
+                        else "💡 Буква в золотой ячейке открыта (-15 очков)"
+                    } else {
+                        if (usedFree) "💡 Stencil slot letter revealed (Free Hint)!"
+                        else "💡 Stencil slot letter revealed (-15 pts)"
+                    }
+                )
+            } else {
+                showToast(
+                    if (isRussian) "Все буквы трафарета уже видны или не хватает зарядов!"
+                    else "All stencil letters are already visible or not enough charges!"
+                )
+            }
         }
     }
 
@@ -323,7 +361,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun toggleCrossedStencilMode() {
         engine.isCrossedStencilMode = !engine.isCrossedStencilMode
-        engine.skipToNextStencilPuzzle()
+        engine.skipToNextStencilPuzzle(respawnActivePiece = false)
         syncStatesFromEngine()
         saveGameProgress()
         showToast(
@@ -385,7 +423,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun toggleLanguage() {
         engine.isRussian = !engine.isRussian
-        engine.skipToNextStencilPuzzle()
+        engine.skipToNextStencilPuzzle(respawnActivePiece = true)
         if (engine.mode == GameMode.CROSSWORD) {
             engine.scanBoardForCrosswordWords()
         }
@@ -395,11 +433,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Selects a family thematic word collection
+     * Selects a family thematic word collection without resetting the active falling piece position
      */
     fun selectTheme(theme: WordTheme) {
         engine.selectedTheme = theme
-        engine.skipToNextStencilPuzzle()
+        engine.skipToNextStencilPuzzle(respawnActivePiece = false)
         if (engine.mode == GameMode.CROSSWORD) {
             engine.scanBoardForCrosswordWords()
         }
@@ -460,13 +498,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Sets or cycles the Pace Mode (Puzzle Step / Relaxed / Arcade)
+     * Sets or cycles the Pace Mode (Puzzle Step / Relaxed / Arcade).
+     * Never starts the background drop loop while the player is on the Menu screen!
      */
     fun updatePaceMode(newPace: PaceMode) {
         engine.paceMode = newPace
         syncStatesFromEngine()
         pauseGameLoop()
-        if (engine.mode == GameMode.TETRIS && !isUserPaused) {
+        if (isGameScreenActive && engine.mode == GameMode.TETRIS && !isUserPaused) {
             startGameLoop()
         }
         saveGameProgress()
@@ -498,8 +537,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 saveGameProgress()
             } else {
                 showToast(
-                    if (isRussian) "Все ячейки трафарета уже заполнены!"
-                    else "All stencil slots are already filled!"
+                    if (isRussian) "Магнит требует 1 заряд 💡 (или 50 очков) и свободную ячейку трафарета!"
+                    else "Magnet requires 1 hint charge 💡 (or 50 pts) and an open stencil slot!"
                 )
             }
         }
@@ -529,7 +568,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             pauseGameLoop()
             saveGameProgress()
         } else {
-            if (engine.mode == GameMode.TETRIS) {
+            if (isGameScreenActive && engine.mode == GameMode.TETRIS) {
                 startGameLoop()
             }
         }
@@ -538,17 +577,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeFromPause() {
         if (isUserPaused) {
             isUserPaused = false
-            if (engine.mode == GameMode.TETRIS) {
+            if (isGameScreenActive && engine.mode == GameMode.TETRIS) {
                 startGameLoop()
             }
         }
     }
 
     /**
-     * Tetris Game Loop controller — respects PUZZLE_STEP (no auto-drop), RELAXED (2600ms), and ARCADE
+     * Tetris Game Loop controller — respects isGameScreenActive, PUZZLE_STEP (no auto-drop), RELAXED (2600ms), and ARCADE
      */
     fun startGameLoop() {
-        if (isPlaying || isUserPaused) return
+        if (!isGameScreenActive || isPlaying || isUserPaused) return
         if (engine.paceMode == PaceMode.PUZZLE_STEP) {
             isPlaying = false
             gameLoopJob?.cancel()
@@ -558,7 +597,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         isPlaying = true
         gameLoopJob = viewModelScope.launch {
-            while (isPlaying && !isUserPaused && engine.mode == GameMode.TETRIS && engine.paceMode != PaceMode.PUZZLE_STEP) {
+            while (isGameScreenActive && isPlaying && !isUserPaused && engine.mode == GameMode.TETRIS && engine.paceMode != PaceMode.PUZZLE_STEP) {
                 val delayTime = when (engine.paceMode) {
                     PaceMode.PUZZLE_STEP -> 3000L
                     PaceMode.RELAXED -> 2600L
@@ -566,7 +605,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 delay(delayTime)
 
-                if (engine.mode == GameMode.TETRIS && isPlaying && !isUserPaused && engine.paceMode != PaceMode.PUZZLE_STEP) {
+                if (isGameScreenActive && engine.mode == GameMode.TETRIS && isPlaying && !isUserPaused && engine.paceMode != PaceMode.PUZZLE_STEP) {
                     val moved = engine.movePiece(0, 1)
                     if (!moved) {
                         engine.lockPiece()
@@ -575,7 +614,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     syncStatesFromEngine()
                 }
             }
-            if (engine.mode == GameMode.CROSSWORD) {
+            if (engine.mode != GameMode.TETRIS) {
                 isPlaying = false
             }
         }
@@ -702,12 +741,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (engine.mode == GameMode.CROSSWORD) {
             val correct = engine.attemptGuessWord(clueId, guess)
             if (correct) {
+                val earned = engine.lastEarnedBonus
                 celebrationTriggerTick++
                 syncStatesFromEngine()
                 saveGameProgress()
                 showToast(
-                    if (isRussian) "✅ Правильно! Линия исчезла! +${150 + (comboCount - 1) * 30} очков"
-                    else "✅ Correct! Line cleared! +${150 + (comboCount - 1) * 30} pts"
+                    if (isRussian) "✅ Правильно! Линия исчезла! +$earned очков"
+                    else "✅ Correct! Line cleared! +$earned pts"
                 )
             } else {
                 syncStatesFromEngine()
@@ -718,8 +758,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun submitGiftWord(word: CharSequence) {
         val text = word.toString().uppercase().trim()
-        if (text.length < 2) {
-            showToast(if (isRussian) "Слово слишком короткое!" else "Word is too short!")
+        if (text.length < 3) {
+            showToast(if (isRussian) "Слово должно содержать не менее 3 букв!" else "Word must be at least 3 letters!")
             return
         }
 
@@ -753,6 +793,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             startGameLoop()
             saveGameProgress()
             showToast(if (isRussian) "Складывание пазлов возобновлено!" else "Puzzle folding resumed!")
+        } else if (engine.paceMode == PaceMode.ARCADE) {
+            // In Arcade mode, if top rows were not cleared during the Crossword rescue round, Game Over is reached!
+            engine.finishGameAndTriggerGameOver()
+            syncStatesFromEngine()
         } else {
             engine.forceLowerStackAndResume()
             syncStatesFromEngine()

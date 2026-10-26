@@ -132,7 +132,7 @@ fun MenuScreen(
             ) {
                 Icon(
                     imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Play",
+                    contentDescription = if (viewModel.isRussian) "Начать игру" else "Play",
                     modifier = Modifier.size(26.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -207,10 +207,10 @@ fun MenuScreen(
                                 contentColor = accentGold
                             ),
                             shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(36.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("menu_encyclopedia_button")
                         ) {
                             Text(
@@ -231,10 +231,10 @@ fun MenuScreen(
                                 contentColor = if (isPaper) Color(0xFF1B5E20) else Color(0xFF00E676)
                             ),
                             shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(36.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("menu_custom_word_button")
                         ) {
                             Text(
@@ -554,7 +554,7 @@ fun MenuScreen(
                     onClick = onNavigateToLeaderboard,
                     modifier = Modifier
                         .weight(1f)
-                        .height(46.dp)
+                        .height(48.dp)
                         .testTag("leaderboard_button"),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = accentPrimary
@@ -564,7 +564,7 @@ fun MenuScreen(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.List,
-                        contentDescription = "Leaderboard",
+                        contentDescription = if (viewModel.isRussian) "Таблица рекордов" else "Leaderboard",
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -579,7 +579,7 @@ fun MenuScreen(
                     onClick = { showHowToPlay = !showHowToPlay },
                     modifier = Modifier
                         .weight(1f)
-                        .height(46.dp)
+                        .height(48.dp)
                         .testTag("instructions_button"),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = cardBg,
@@ -590,7 +590,7 @@ fun MenuScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Info,
-                        contentDescription = "Rules",
+                        contentDescription = if (viewModel.isRussian) "Правила игры" else "Rules",
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))

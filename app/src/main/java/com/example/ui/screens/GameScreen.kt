@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -70,18 +71,22 @@ fun GameScreen(
         }
     }
 
-    // Trigger game loop when the screen is active in Tetris Mode (respects PaceMode.PUZZLE_STEP!)
-    LaunchedEffect(viewModel.currentMode, viewModel.isUserPaused, viewModel.paceMode) {
+    // Track active screen and trigger game loop only when GameScreen is visible
+    DisposableEffect(Unit) {
+        viewModel.isGameScreenActive = true
         if (viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused && viewModel.paceMode != PaceMode.PUZZLE_STEP) {
             viewModel.startGameLoop()
-        } else {
+        }
+        onDispose {
+            viewModel.isGameScreenActive = false
             viewModel.pauseGameLoop()
         }
     }
 
-    // Stop game loop when leaving
-    DisposableEffect(Unit) {
-        onDispose {
+    LaunchedEffect(viewModel.currentMode, viewModel.isUserPaused, viewModel.paceMode) {
+        if (viewModel.isGameScreenActive && viewModel.currentMode == GameMode.TETRIS && !viewModel.isUserPaused && viewModel.paceMode != PaceMode.PUZZLE_STEP) {
+            viewModel.startGameLoop()
+        } else {
             viewModel.pauseGameLoop()
         }
     }
@@ -154,7 +159,7 @@ fun GameScreen(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Menu",
+                            contentDescription = if (viewModel.isRussian) "В главное меню" else "Back to Menu",
                             tint = textPrimary
                         )
                     }
@@ -274,7 +279,11 @@ fun GameScreen(
                     ) {
                         Icon(
                             imageVector = if (viewModel.isUserPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                            contentDescription = if (viewModel.isUserPaused) "Resume" else "Pause",
+                            contentDescription = if (viewModel.isUserPaused) {
+                                if (viewModel.isRussian) "Продолжить" else "Resume"
+                            } else {
+                                if (viewModel.isRussian) "Пауза" else "Pause"
+                            },
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(2.dp))
@@ -289,13 +298,25 @@ fun GameScreen(
                         )
                     }
 
+                    // Trophy Button to Finish & Save Score to Leaderboard anytime!
+                    IconButton(
+                        onClick = { viewModel.finishAndSaveScore() },
+                        modifier = Modifier.testTag("top_finish_save_score_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EmojiEvents,
+                            contentDescription = if (viewModel.isRussian) "Завершить и сохранить рекорд" else "Finish and save score",
+                            tint = if (isPaper) Color(0xFFB45309) else Color(0xFFFFD54F)
+                        )
+                    }
+
                     IconButton(
                         onClick = { viewModel.restartGame() },
                         modifier = Modifier.testTag("restart_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
-                            contentDescription = "Restart",
+                            contentDescription = if (viewModel.isRussian) "Начать заново" else "Restart",
                             tint = textPrimary
                         )
                     }
@@ -1055,15 +1076,25 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                             val c = if (viewModel.engine.isValidPoint(slot.x, slot.y)) board[slot.y][slot.x] else null
                             if (c != null && (c.char == slot.expectedChar || c.char == Dictionary.WILDCARD_CHAR)) {
                                 c.char.toString()
-                            } else {
+                            } else if (viewModel.isSingleTileMode || slot.isHintRevealed) {
                                 "[${slot.expectedChar}]"
+                            } else {
+                                "[?]"
                             }
                         }
                     } else {
-                        quest.word
+                        quest.word.map { "?" }.joinToString(" ")
                     }
 
                     val secQuest = if (viewModel.isCrossedStencilMode) viewModel.secondaryQuestWord else null
+                    val vSlots = viewModel.stencilSlots.filter { !it.isHorizontal }
+                    val secPreview = if (secQuest != null) {
+                        if (vSlots.isNotEmpty()) {
+                            "${secQuest.word.length} б."
+                        } else {
+                            "${secQuest.word.length} б."
+                        }
+                    } else ""
 
                     Column(
                         modifier = Modifier
@@ -1082,15 +1113,15 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                         ) {
                             Text(
                                 text = if (secQuest != null) {
-                                    if (viewModel.isRussian) "✚ Крест: ↔ $stencilPreview | ↕ ${secQuest.word}"
-                                    else "✚ Cross: ↔ $stencilPreview | ↕ ${secQuest.word}"
+                                    if (viewModel.isRussian) "✚ Крест: ↔ $stencilPreview | ↕ $secPreview"
+                                    else "✚ Cross: ↔ $stencilPreview | ↕ ${secQuest.word.length}L"
                                 } else {
                                     if (viewModel.isRussian) "🧩 Загадка (${quest.category.ifBlank { "Слово" }}): $stencilPreview"
                                     else "🧩 Puzzle (${quest.category.ifBlank { "Word" }}): $stencilPreview"
                                 },
                                 color = accentGold,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = if (viewModel.isLargeFontMode) 13.sp else 11.sp,
+                                fontSize = if (viewModel.isLargeFontMode) 14.sp else 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -1111,12 +1142,33 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(26.dp)
+                                        .height(28.dp)
                                         .testTag("speak_riddle_button")
                                 ) {
                                     Text(
                                         text = "🔊",
                                         fontSize = 11.sp
+                                    )
+                                }
+
+                                // 💡 Reveal '?' Letter Hint in Stencil Slot (without auto-placing)
+                                FilledTonalButton(
+                                    onClick = { viewModel.revealStencilHint() },
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = accentGold.copy(alpha = 0.16f),
+                                        contentColor = accentGold
+                                    ),
+                                    border = BorderStroke(1.dp, accentGold),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier
+                                        .height(28.dp)
+                                        .testTag("stencil_hint_button")
+                                ) {
+                                    Text(
+                                        text = "💡?",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
                                     )
                                 }
 
@@ -1131,7 +1183,7 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(26.dp)
+                                        .height(28.dp)
                                         .testTag("magnet_helper_button")
                                 ) {
                                     Text(
@@ -1149,7 +1201,7 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     border = BorderStroke(1.dp, borderCol),
                                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(26.dp)
+                                        .height(28.dp)
                                         .testTag("undo_move_button")
                                 ) {
                                     Text(
@@ -1165,7 +1217,7 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                     border = BorderStroke(1.dp, borderCol),
                                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(26.dp)
+                                        .height(28.dp)
                                         .testTag("skip_stencil_button")
                                 ) {
                                     Text(
@@ -1176,7 +1228,7 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                             }
                         }
 
-                        // Large readable clue text for seniors, moms, and children
+                        // Large readable clue text for seniors, moms, and children (16sp in Large Font mode!)
                         Text(
                             text = if (secQuest != null) {
                                 "↔ ${quest.definition}\n↕ ${secQuest.definition}"
@@ -1184,8 +1236,9 @@ fun ScoreAndPreviewPanel(viewModel: GameViewModel) {
                                 quest.definition
                             },
                             color = textPrimary,
-                            fontSize = if (viewModel.isLargeFontMode) 13.sp else 11.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontSize = if (viewModel.isLargeFontMode) 16.sp else 12.sp,
+                            lineHeight = if (viewModel.isLargeFontMode) 20.sp else 16.sp,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1442,19 +1495,25 @@ fun BoardView(
                                     viewModel.isUserPaused -> ""
                                     activeChar != null -> activeChar.toString()
                                     cell != null -> cell.char.toString()
-                                    isOpenStencilTarget -> stencilSlot?.expectedChar?.toString() ?: ""
+                                    isOpenStencilTarget -> {
+                                        if (viewModel.isSingleTileMode || stencilSlot?.isHintRevealed == true) {
+                                            stencilSlot?.expectedChar?.toString() ?: "?"
+                                        } else {
+                                            "?"
+                                        }
+                                    }
                                     else -> ""
                                 }
                                 if (displayText.isNotEmpty()) {
                                     Text(
                                         text = displayText,
-                                        fontSize = if (viewModel.isLargeFontMode) 15.sp else 13.sp,
+                                        fontSize = if (viewModel.isLargeFontMode) 17.sp else 13.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontFamily = FontFamily.Monospace,
                                         color = when {
                                             isWildcard -> Color(0xFF1C1B1F)
                                             activeChar != null -> if (isPaper) Color.White else Color(0xFF381E72)
-                                            isOpenStencilTarget -> if (isPaper) Color(0xFFB45309) else Color(0xFFFFD54F).copy(alpha = 0.88f)
+                                            isOpenStencilTarget -> if (isPaper) Color(0xFFB45309) else Color(0xFFFFD54F).copy(alpha = 0.92f)
                                             isAnchorTile -> if (isPaper) Color(0xFF2C1E14) else Color(0xFFFFF59D)
                                             else -> if (isPaper) Color(0xFF2C1E14) else Color(0xFFE6E1E5)
                                         },
@@ -1486,7 +1545,7 @@ fun BoardView(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.PauseCircle,
@@ -1503,20 +1562,20 @@ fun BoardView(
                         )
                         Text(
                             text = if (viewModel.isRussian) {
-                                "Совет: нажмите «🔊» для озвучки загадки голосом, «↩️» для отмены хода или «✍️», чтобы загадать своё семейное слово!"
+                                "Совет: нажмите «💡?» для открытия буквы в золотой ячейке, «🔊» для озвучки загадки голосом или «🏆», чтобы сохранить свой рекорд!"
                             } else {
-                                "Tip: Tap '🔊' to hear the riddle aloud, '↩️' to undo a move, or '✍️' to create your own family word!"
+                                "Tip: Tap '💡?' to reveal the slot letter, '🔊' to hear the riddle aloud, or '🏆' to save your high score!"
                             },
                             color = Color(0xFFCAC4D0),
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Button(
                             onClick = { viewModel.resumeFromPause() },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
+                                .height(48.dp)
                                 .testTag("resume_pause_button"),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFFD0BCFF),
@@ -1531,11 +1590,31 @@ fun BoardView(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                        FilledTonalButton(
+                            onClick = { viewModel.finishAndSaveScore() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("finish_and_save_score_button"),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0xFFFFD54F).copy(alpha = 0.2f),
+                                contentColor = Color(0xFFFFD54F)
+                            ),
+                            border = BorderStroke(1.dp, Color(0xFFFFD54F)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.EmojiEvents, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (viewModel.isRussian) "🏆 ЗАВЕРШИТЬ И СОХРАНИТЬ СЧЁТ" else "🏆 FINISH & SAVE SCORE",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                         OutlinedButton(
                             onClick = { viewModel.restartGame() },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(42.dp),
+                                .height(48.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE6E1E5)),
                             border = BorderStroke(1.dp, Color(0xFF49454F)),
                             shape = RoundedCornerShape(12.dp)
@@ -1546,7 +1625,8 @@ fun BoardView(
                             onClick = {
                                 viewModel.saveGameProgress()
                                 onNavigateBack()
-                            }
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Text(
                                 text = if (viewModel.isRussian) "Выйти в главное меню" else "Exit to Main Menu",
@@ -1687,7 +1767,7 @@ fun LiveTetrisControlPanel(
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(48.dp)
                     .testTag("ctrl_undo")
             ) {
                 Text(
@@ -1709,12 +1789,12 @@ fun LiveTetrisControlPanel(
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(48.dp)
                     .testTag("ctrl_hold")
             ) {
                 Icon(
                     imageVector = Icons.Default.Inventory2,
-                    contentDescription = "Hold Piece",
+                    contentDescription = if (viewModel.isRussian) "Отложить фигуру в карман" else "Hold Piece",
                     modifier = Modifier.size(15.dp)
                 )
                 Spacer(modifier = Modifier.width(3.dp))
@@ -1729,14 +1809,14 @@ fun LiveTetrisControlPanel(
             IconButton(
                 onClick = { viewModel.rotatePiece() },
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(accentPrimary)
                     .testTag("ctrl_rotate")
             ) {
                 Icon(
-                    imageVector = Icons.Default.RotateRight,
-                    contentDescription = "Rotate Shape",
+                    imageVector = Icons.AutoMirrored.Filled.RotateRight,
+                    contentDescription = if (viewModel.isRussian) "Повернуть фигуру" else "Rotate Shape",
                     tint = if (isPaper) Color.White else Color(0xFF381E72),
                     modifier = Modifier.size(24.dp)
                 )
@@ -1753,12 +1833,12 @@ fun LiveTetrisControlPanel(
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(48.dp)
                     .testTag("ctrl_shift_letters")
             ) {
                 Icon(
                     imageVector = Icons.Default.SwapHoriz,
-                    contentDescription = "Cycle Letters",
+                    contentDescription = if (viewModel.isRussian) "Сдвинуть буквы внутри фигуры" else "Cycle Letters",
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(3.dp))
@@ -1786,7 +1866,7 @@ fun LiveTetrisControlPanel(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = "Move Left",
+                    contentDescription = if (viewModel.isRussian) "Влево" else "Move Left",
                     tint = textPrimary,
                     modifier = Modifier.size(30.dp)
                 )
@@ -1802,7 +1882,7 @@ fun LiveTetrisControlPanel(
             ) {
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Step Down",
+                    contentDescription = if (viewModel.isRussian) "Шаг вниз" else "Step Down",
                     tint = textPrimary,
                     modifier = Modifier.size(30.dp)
                 )
@@ -1822,7 +1902,7 @@ fun LiveTetrisControlPanel(
             ) {
                 Icon(
                     imageVector = Icons.Default.KeyboardDoubleArrowDown,
-                    contentDescription = "Place Piece",
+                    contentDescription = if (viewModel.isRussian) "Поставить фигуру" else "Place Piece",
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
@@ -1843,7 +1923,7 @@ fun LiveTetrisControlPanel(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Move Right",
+                    contentDescription = if (viewModel.isRussian) "Вправо" else "Move Right",
                     tint = textPrimary,
                     modifier = Modifier.size(30.dp)
                 )
