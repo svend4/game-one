@@ -52,6 +52,13 @@ data class StencilSlot(
     val isHintRevealed: Boolean = false
 )
 
+data class FadingBoardCell(
+    val x: Int,
+    val y: Int,
+    val char: Char,
+    val colorHex: String
+)
+
 /**
  * Snapshot of the game state before a move, enabling 1-tap "↩️ Отменить ход" (Undo) for seniors & kids.
  */
@@ -63,6 +70,7 @@ data class BoardSnapshot(
     val freeHintCharges: Int,
     val activePiece: ActivePiece?,
     val nextPieceShapeType: Int,
+    val nextPieceLetters: List<Char>,
     val heldPieceShapeType: Int?,
     val heldPieceLetters: List<Char>?,
     val canHoldThisTurn: Boolean,
@@ -79,7 +87,13 @@ data class BoardSnapshot(
     val stencilStartCol: Int,
     val usedMagnetOnCurrentStencil: Boolean = false,
     val isHorizontalCrossSolved: Boolean = false,
-    val isVerticalCrossSolved: Boolean = false
+    val isVerticalCrossSolved: Boolean = false,
+    val movesWithoutStencilProgress: Int = 0,
+    val helpTargetSlot: GridPoint? = null,
+    val isHelpPieceActive: Boolean = false,
+    val helpPieceTargetLetterIndex: Int = -1,
+    val isTowerWarningActive: Boolean = false,
+    val towerProtectionTriggerCount: Int = 0
 )
 
 data class CrosswordClue(
@@ -133,54 +147,54 @@ object TetrominoShapes {
     const val SINGLE_TILE_SHAPE = 7
 
     val SHAPES = listOf(
-        // 0: I shape
+        // 0: I shape — physical 90° CW rotation per cell index (after 2 rotations top-to-bottom Р-А-Р-С becomes С-Р-А-Р)
         listOf(
             listOf(0 to -1, 0 to 0, 0 to 1, 0 to 2),
-            listOf(-1 to 0, 0 to 0, 1 to 0, 2 to 0),
-            listOf(0 to -1, 0 to 0, 0 to 1, 0 to 2),
+            listOf(2 to 0, 1 to 0, 0 to 0, -1 to 0),
+            listOf(0 to 2, 0 to 1, 0 to 0, 0 to -1),
             listOf(-1 to 0, 0 to 0, 1 to 0, 2 to 0)
         ),
-        // 1: O shape
+        // 1: O shape — physical 90° CW rotation around 2x2 center (TL -> TR -> BR -> BL)
         listOf(
-            listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1),
-            listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1),
-            listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1),
-            listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1)
+            listOf(0 to 0, 1 to 0, 1 to 1, 0 to 1),
+            listOf(1 to 0, 1 to 1, 0 to 1, 0 to 0),
+            listOf(1 to 1, 0 to 1, 0 to 0, 1 to 0),
+            listOf(0 to 1, 0 to 0, 1 to 0, 1 to 1)
         ),
-        // 2: T shape
+        // 2: T shape — physical 90° CW rotation (dx, dy) -> (-dy, dx)
         listOf(
             listOf(0 to 0, -1 to 0, 1 to 0, 0 to -1),
             listOf(0 to 0, 0 to -1, 0 to 1, 1 to 0),
-            listOf(0 to 0, -1 to 0, 1 to 0, 0 to 1),
-            listOf(0 to 0, 0 to -1, 0 to 1, -1 to 0)
+            listOf(0 to 0, 1 to 0, -1 to 0, 0 to 1),
+            listOf(0 to 0, 0 to 1, 0 to -1, -1 to 0)
         ),
-        // 3: S shape
+        // 3: S shape — physical 90° CW rotation (dx, dy) -> (-dy, dx)
         listOf(
             listOf(0 to 0, 1 to 0, 0 to 1, -1 to 1),
-            listOf(0 to 0, 0 to -1, 1 to 0, 1 to 1),
-            listOf(0 to 0, 1 to 0, 0 to 1, -1 to 1),
+            listOf(0 to 0, 0 to 1, -1 to 0, -1 to -1),
+            listOf(0 to 0, -1 to 0, 0 to -1, 1 to -1),
             listOf(0 to 0, 0 to -1, 1 to 0, 1 to 1)
         ),
-        // 4: Z shape
+        // 4: Z shape — physical 90° CW rotation (dx, dy) -> (-dy, dx)
         listOf(
             listOf(0 to 0, -1 to 0, 0 to 1, 1 to 1),
-            listOf(0 to 0, 0 to 1, 1 to 0, 1 to -1),
-            listOf(0 to 0, -1 to 0, 0 to 1, 1 to 1),
+            listOf(0 to 0, 0 to -1, -1 to 0, -1 to 1),
+            listOf(0 to 0, 1 to 0, 0 to -1, -1 to -1),
             listOf(0 to 0, 0 to 1, 1 to 0, 1 to -1)
         ),
-        // 5: J shape
+        // 5: J shape — physical 90° CW rotation (dx, dy) -> (-dy, dx)
         listOf(
             listOf(0 to 0, 0 to -1, 0 to 1, -1 to 1),
-            listOf(0 to 0, -1 to 0, 1 to 0, 1 to 1),
-            listOf(0 to 0, 0 to -1, 0 to 1, 1 to -1),
-            listOf(0 to 0, -1 to 0, -1 to -1, 1 to 0)
+            listOf(0 to 0, 1 to 0, -1 to 0, -1 to -1),
+            listOf(0 to 0, 0 to 1, 0 to -1, 1 to -1),
+            listOf(0 to 0, -1 to 0, 1 to 0, 1 to 1)
         ),
-        // 6: L shape
+        // 6: L shape — physical 90° CW rotation (dx, dy) -> (-dy, dx)
         listOf(
             listOf(0 to 0, 0 to -1, 0 to 1, 1 to 1),
-            listOf(0 to 0, -1 to 0, 1 to 0, -1 to 1),
-            listOf(0 to 0, 0 to -1, 0 to 1, -1 to -1),
-            listOf(0 to 0, -1 to 0, 1 to -1, 1 to 0)
+            listOf(0 to 0, 1 to 0, -1 to 0, -1 to 1),
+            listOf(0 to 0, 0 to 1, 0 to -1, -1 to -1),
+            listOf(0 to 0, -1 to 0, 1 to 0, 1 to -1)
         ),
         // 7: Single 1x1 Puzzle Tile (for Kids & Cozy Puzzle Mode!)
         listOf(
@@ -214,6 +228,12 @@ class GameEngine(
     var isRussian: Boolean = true,
     var random: Random = Random.Default
 ) {
+    companion object {
+        const val NO_PROGRESS_LIMIT = 3
+        const val TOWER_WARNING_ROW = 4
+        const val SPAWN_ZONE_ROW = 2
+    }
+
     var board = Array(rows) { arrayOfNulls<GameCell>(cols) }
 
     var mode = GameMode.TETRIS
@@ -243,6 +263,7 @@ class GameEngine(
 
     var activePiece: ActivePiece? = null
     var nextPieceShapeType: Int = random.nextInt(7)
+    var nextPieceLetters: List<Char> = emptyList()
 
     // Hold pocket state
     var heldPieceShapeType: Int? = null
@@ -265,6 +286,32 @@ class GameEngine(
     var lastUnlockedWords = mutableListOf<String>()
     var lastDailyWordJustSolved: Boolean = false
     var lastSafetyClearTriggered: Boolean = false
+    var lastWrongSlotLetterWarning: Boolean = false
+    var lastWrongSlotLetterMessage: String? = null
+
+    // NoProgressHelp ("Помощь") counter & highlight state
+    var movesWithoutStencilProgress: Int = 0
+    var helpTargetSlot: GridPoint? = null
+    var isHelpPieceActive: Boolean = false
+    var helpPieceTargetLetterIndex: Int = -1
+    var lastHelpTriggered: Boolean = false
+    var lastHelpTargetChar: Char? = null
+    var lastHelpMessage: String? = null
+    var lastRemovedBlocksCount: Int = 0
+    var lastPathClearedMessage: String? = null
+    val lastRemovedCellsForFade = mutableListOf<FadingBoardCell>()
+
+    // High tower warning (y <= TOWER_WARNING_ROW) & critical tower protection (y <= SPAWN_ZONE_ROW) state
+    var isTowerWarningActive: Boolean = false
+    var towerWarningShownThisTurn: Boolean = false
+    var lastTowerWarningMessage: String? = null
+    var towerProtectionTriggerCount: Int = 0
+    var lastProtectionRemovedBlocksCount: Int = 0
+    var lastProtectionMessage: String? = null
+    var lastProtectionPieceToHold: Boolean = false
+    var lastProtectionPieceToQueue: Boolean = false
+    var lastProtectionPieceMessage: String? = null
+    private var protectionTriggeredInCurrentLock: Boolean = false
 
     // Gift letters entered by user & set of already-rewarded gift words in this game session
     val giftLettersQueue = mutableListOf<Char>()
@@ -312,10 +359,30 @@ class GameEngine(
             board[fromRow][col] = null
             return
         }
-        for (r in 0 until fromRow) {
-            board[r][col] = board[r + 1][col]
+        // Only shift the column up if row 3 is empty so we never push blocks into rows 0..2 (Game Over zone)
+        if (fromRow > 3 && board[3][col] == null) {
+            for (r in 3 until fromRow) {
+                board[r][col] = board[r + 1][col]
+            }
+            board[fromRow][col] = null
+        } else {
+            // Column is tall: try to relocate existing cell sideways on fromRow or safe rows 3..fromRow
+            board[fromRow][col] = null
+            for (targetRow in fromRow downTo 3) {
+                for (dist in 1 until cols) {
+                    val leftCol = col - dist
+                    val rightCol = col + dist
+                    if (leftCol in 0 until cols && board[targetRow][leftCol] == null) {
+                        board[targetRow][leftCol] = existing
+                        return
+                    }
+                    if (rightCol in 0 until cols && board[targetRow][rightCol] == null) {
+                        board[targetRow][rightCol] = existing
+                        return
+                    }
+                }
+            }
         }
-        board[fromRow][col] = null
     }
 
     /**
@@ -335,6 +402,7 @@ class GameEngine(
             freeHintCharges = freeHintCharges,
             activePiece = activePiece?.copy(letters = activePiece?.letters?.toList() ?: emptyList()),
             nextPieceShapeType = nextPieceShapeType,
+            nextPieceLetters = nextPieceLetters.toList(),
             heldPieceShapeType = heldPieceShapeType,
             heldPieceLetters = heldPieceLetters?.toList(),
             canHoldThisTurn = canHoldThisTurn,
@@ -351,7 +419,13 @@ class GameEngine(
             stencilStartCol = stencilStartCol,
             usedMagnetOnCurrentStencil = usedMagnetOnCurrentStencil,
             isHorizontalCrossSolved = isHorizontalCrossSolved,
-            isVerticalCrossSolved = isVerticalCrossSolved
+            isVerticalCrossSolved = isVerticalCrossSolved,
+            movesWithoutStencilProgress = movesWithoutStencilProgress,
+            helpTargetSlot = helpTargetSlot?.copy(),
+            isHelpPieceActive = isHelpPieceActive,
+            helpPieceTargetLetterIndex = helpPieceTargetLetterIndex,
+            isTowerWarningActive = isTowerWarningActive,
+            towerProtectionTriggerCount = towerProtectionTriggerCount
         )
         if (undoStack.size >= 8) {
             undoStack.removeFirst()
@@ -360,7 +434,7 @@ class GameEngine(
     }
 
     /**
-     * Restores the previous board state ("↩️ Отменить ход").
+     * Restores the previous board state ("↩️ Отменить ход"), including board, stencil, pocket, counters, and warning flags.
      */
     fun undoLastMove(): Boolean {
         if (undoStack.isEmpty()) return false
@@ -375,6 +449,7 @@ class GameEngine(
         wordsClearedCount = snap.wordsClearedCount
         freeHintCharges = snap.freeHintCharges
         nextPieceShapeType = snap.nextPieceShapeType
+        nextPieceLetters = snap.nextPieceLetters.toList()
         heldPieceShapeType = snap.heldPieceShapeType
         heldPieceLetters = snap.heldPieceLetters?.toList()
         canHoldThisTurn = snap.canHoldThisTurn
@@ -395,6 +470,26 @@ class GameEngine(
         usedMagnetOnCurrentStencil = snap.usedMagnetOnCurrentStencil
         isHorizontalCrossSolved = snap.isHorizontalCrossSolved
         isVerticalCrossSolved = snap.isVerticalCrossSolved
+        movesWithoutStencilProgress = snap.movesWithoutStencilProgress
+        helpTargetSlot = snap.helpTargetSlot?.copy()
+        isHelpPieceActive = snap.isHelpPieceActive
+        helpPieceTargetLetterIndex = snap.helpPieceTargetLetterIndex
+        isTowerWarningActive = snap.isTowerWarningActive
+        towerProtectionTriggerCount = snap.towerProtectionTriggerCount
+        towerWarningShownThisTurn = false
+        lastTowerWarningMessage = if (isTowerWarningActive) formatTowerHighWarningMessage() else null
+        lastHelpTriggered = false
+        lastHelpTargetChar = null
+        lastHelpMessage = null
+        lastRemovedBlocksCount = 0
+        lastPathClearedMessage = null
+        lastSafetyClearTriggered = false
+        lastProtectionRemovedBlocksCount = 0
+        lastProtectionMessage = null
+        lastProtectionPieceToHold = false
+        lastProtectionPieceToQueue = false
+        lastProtectionPieceMessage = null
+        lastRemovedCellsForFade.clear()
         mode = GameMode.TETRIS
         if (snap.activePiece != null) {
             activePiece = snap.activePiece
@@ -422,16 +517,19 @@ class GameEngine(
             levelTargetWords.add(primary.word)
 
             if (isCrossedStencilMode) {
+                val primaryNorm = Dictionary.normalizeYo(primary.word)
+                val allLangDefs = Dictionary.getDefinitionsForLanguage(isRussian)
+                    .filter { it.word.length in 3..5 && it.word != primary.word }
+                val candidatePool = (shuffled.drop(1).filter { it.word.length in 3..5 && it.word != primary.word } + allLangDefs)
+                    .distinctBy { it.word }
                 // Prefer a vertical partner word whose LAST letter (or any non-first letter) intersects primary.word
                 // so the vertical word extends upward from the bottom row with its open slot at the very top!
-                val crossCandidate = shuffled.drop(1).firstOrNull { cand ->
-                    cand.word.length in 3..5 && cand.word != primary.word && primary.word.contains(cand.word.last())
-                } ?: shuffled.drop(1).firstOrNull { cand ->
-                    cand.word.length in 3..5 && cand.word != primary.word &&
-                        cand.word.substring(1).any { ch -> primary.word.contains(ch) }
-                } ?: shuffled.drop(1).firstOrNull { cand ->
-                    cand.word.length in 3..5 && cand.word != primary.word &&
-                        cand.word.any { ch -> primary.word.contains(ch) }
+                val crossCandidate = candidatePool.firstOrNull { cand ->
+                    primaryNorm.contains(Dictionary.normalizeYo(cand.word.last().toString()))
+                } ?: candidatePool.firstOrNull { cand ->
+                    cand.word.substring(1).any { ch -> primaryNorm.contains(Dictionary.normalizeYo(ch.toString())) }
+                } ?: candidatePool.firstOrNull { cand ->
+                    cand.word.any { ch -> primaryNorm.contains(Dictionary.normalizeYo(ch.toString())) }
                 }
                 secondaryQuestWordDefinition = crossCandidate
                 if (crossCandidate != null) {
@@ -485,6 +583,10 @@ class GameEngine(
         usedMagnetOnCurrentStencil = false
         isHorizontalCrossSolved = false
         isVerticalCrossSolved = false
+        movesWithoutStencilProgress = 0
+        helpTargetSlot = null
+        isHelpPieceActive = false
+        helpPieceTargetLetterIndex = -1
         val quest = questWordDefinition ?: return
         val hWord = quest.word.take(cols - 2)
 
@@ -496,7 +598,7 @@ class GameEngine(
             var intersectV = -1
             // 1st priority: match the last character of vWord so the horizontal word sits at rows - 1
             for (hi in hWord.indices) {
-                if (hWord[hi] == vWord.last()) {
+                if (Dictionary.normalizeYo(hWord[hi].toString()) == Dictionary.normalizeYo(vWord.last().toString())) {
                     intersectH = hi
                     intersectV = vWord.lastIndex
                     break
@@ -506,7 +608,7 @@ class GameEngine(
             if (intersectH == -1) {
                 outer@ for (vi in vWord.lastIndex downTo 1) {
                     for (hi in hWord.indices) {
-                        if (hWord[hi] == vWord[vi]) {
+                        if (Dictionary.normalizeYo(hWord[hi].toString()) == Dictionary.normalizeYo(vWord[vi].toString())) {
                             intersectH = hi
                             intersectV = vi
                             break@outer
@@ -517,7 +619,7 @@ class GameEngine(
             // 3rd fallback: match vi == 0
             if (intersectH == -1) {
                 for (hi in hWord.indices) {
-                    if (hWord[hi] == vWord[0]) {
+                    if (Dictionary.normalizeYo(hWord[hi].toString()) == Dictionary.normalizeYo(vWord[0].toString())) {
                         intersectH = hi
                         intersectV = 0
                         break
@@ -534,9 +636,9 @@ class GameEngine(
 
                 // Ensure the open horizontal slot is NOT on the intersection column
                 val hMissingIdx = hWord.indices.firstOrNull { it != intersectH } ?: intersectH
-                // Place the open vertical slot at the TOP-MOST cell of the vertical word (index 0) whenever intersectV > 0
-                // so nothing is above it and all cells below it are solid anchor tiles!
-                val vMissingIdx = if (intersectV > 0) 0 else 1.coerceAtMost(vWord.lastIndex)
+                // Always place the open vertical slot at the TOP-MOST cell of the vertical word (index 0)
+                // so nothing in the vertical word is above it and all cells below it are solid anchor tiles!
+                val vMissingIdx = 0
 
                 // If targetRow < rows - 1 (when intersectV < vWord.lastIndex), ensure the column under hMissingIdx
                 // has support up to targetRow + 1 so the horizontal open slot cannot be fallen through.
@@ -552,11 +654,25 @@ class GameEngine(
                     }
                 }
 
+                // Preserve any existing player cells at horizontal and vertical stencil coordinates BEFORE placing anchors
+                // so shifting a column up never moves newly placed stencil anchors into or above open slots.
+                for (i in hWord.indices) {
+                    val c = stencilStartCol + i
+                    if (isValidPoint(c, stencilRow)) {
+                        preservePlayerCellBeforeStencil(c, stencilRow)
+                    }
+                }
+                for (j in vWord.indices) {
+                    val r = startRowV + j
+                    if (r != stencilRow && isValidPoint(crossCol, r)) {
+                        preservePlayerCellBeforeStencil(crossCol, r)
+                    }
+                }
+
                 // 1. Place Horizontal Word
                 for (i in hWord.indices) {
                     val c = stencilStartCol + i
                     if (!isValidPoint(c, stencilRow)) continue
-                    preservePlayerCellBeforeStencil(c, stencilRow)
                     val ch = hWord[i]
                     stencilSlots.add(
                         StencilSlot(
@@ -567,7 +683,8 @@ class GameEngine(
                             isHintRevealed = false
                         )
                     )
-                    if (i != hMissingIdx) {
+                    val isIntersectionOpenVertical = (i == intersectH && intersectV == vMissingIdx)
+                    if (i != hMissingIdx && !isIntersectionOpenVertical) {
                         board[stencilRow][c] = GameCell(
                             char = ch,
                             colorHex = "#5E35B1",
@@ -583,29 +700,30 @@ class GameEngine(
                 for (j in vWord.indices) {
                     val r = startRowV + j
                     if (!isValidPoint(crossCol, r)) continue
-                    if (r != stencilRow) {
-                        preservePlayerCellBeforeStencil(crossCol, r)
-                    }
                     val ch = vWord[j]
-                    if (stencilSlots.none { it.x == crossCol && it.y == r }) {
-                        stencilSlots.add(
-                            StencilSlot(
-                                x = crossCol,
-                                y = r,
-                                expectedChar = ch,
-                                isHorizontal = false,
-                                isHintRevealed = false
+                    if (stencilSlots.none { it.x == crossCol && it.y == r && !it.isHorizontal }) {
+                        if (r != stencilRow || intersectV == vMissingIdx) {
+                            stencilSlots.add(
+                                StencilSlot(
+                                    x = crossCol,
+                                    y = r,
+                                    expectedChar = ch,
+                                    isHorizontal = false,
+                                    isHintRevealed = false
+                                )
                             )
-                        )
+                        }
                     }
                     if (j == intersectV) {
-                        if (hMissingIdx != intersectH) {
+                        if (hMissingIdx != intersectH && intersectV != vMissingIdx) {
                             board[r][crossCol] = GameCell(
                                 char = ch,
                                 colorHex = "#5E35B1",
                                 isWildcard = false,
                                 isAnchor = true
                             )
+                        } else {
+                            board[r][crossCol] = null
                         }
                     } else if (j != vMissingIdx) {
                         board[r][crossCol] = GameCell(
@@ -618,6 +736,8 @@ class GameEngine(
                         board[r][crossCol] = null
                     }
                 }
+                ensureOpenSlotsUnobstructedByRemnants()
+                refreshNextPiecePreview()
                 return
             }
         }
@@ -662,6 +782,8 @@ class GameEngine(
                 board[stencilRow][c] = null
             }
         }
+        ensureOpenSlotsUnobstructedByRemnants()
+        refreshNextPiecePreview()
     }
 
     /**
@@ -695,14 +817,18 @@ class GameEngine(
      * Logs a warning when restoration occurs.
      */
     fun ensureQuestWordDefinitionRestored(): WordDefinition? {
-        val current = questWordDefinition
-        if (current != null) return current
-
         val hWord = stencilSlots
             .filter { it.isHorizontal }
             .sortedBy { it.x }
             .map { it.expectedChar }
             .joinToString("")
+
+        val current = questWordDefinition
+        if (current != null) {
+            if (hWord.isBlank() || Dictionary.normalizeYo(current.word).startsWith(Dictionary.normalizeYo(hWord))) {
+                return current
+            }
+        }
 
         val candidate = when {
             hWord.isNotBlank() -> hWord
@@ -720,7 +846,7 @@ class GameEngine(
                     funFact = Dictionary.getFunFact(candidate, isRussian)
                 )
             questWordDefinition = def
-            Log.w("TetriCross", "questWordDefinition was null! Restored word '${def.word}' from active stencil slots/riddle")
+            Log.w("TetriCross", "questWordDefinition restored/synchronized to '${def.word}' from active stencil slots/riddle")
             return def
         }
 
@@ -869,7 +995,7 @@ class GameEngine(
             isDailyWordActive = false
         }
 
-        // Clear all stencil slots and any anchor tiles on the board first
+        // 1. Word clear (очистка слова)
         for (slot in stencilSlots) {
             if (isValidPoint(slot.x, slot.y)) {
                 board[slot.y][slot.x] = null
@@ -893,13 +1019,25 @@ class GameEngine(
             }
         }
 
-        // Apply smooth gravity so blocks above drop down
+        // 2. Shift remnants down (сдвиг остатков)
         stencilSlots.clear()
         applyGravityToStackedBlocks()
 
-        // Generate the next Crossword Puzzle word and place its stencil
+        // 3. Invariant check after shifting remnants (проверка инварианта)
+        ensureOpenSlotsUnobstructedByRemnants()
+
+        // 4. Spawn new stencil (появление нового трафарета)
         generateNewTargetWords()
         placeCrosswordStencilOnBoard()
+
+        // 5. Re-check invariant after new stencil placement (повторная проверка инварианта)
+        ensureOpenSlotsUnobstructedByRemnants()
+        movesWithoutStencilProgress = 0
+        helpTargetSlot = null
+        isHelpPieceActive = false
+        helpPieceTargetLetterIndex = -1
+        updateTowerWarningStateAfterBoardChange()
+        refreshNextPiecePreview()
     }
 
     /**
@@ -913,8 +1051,7 @@ class GameEngine(
             placeCrosswordStencilOnBoard()
         }
         val missingSlotIndex = stencilSlots.indexOfFirst { slot ->
-            val cell = if (isValidPoint(slot.x, slot.y)) board[slot.y][slot.x] else null
-            cell == null || (cell.char != slot.expectedChar && cell.char != Dictionary.WILDCARD_CHAR)
+            isStencilSlotOpen(slot)
         }
         if (missingSlotIndex == -1) return false
 
@@ -940,6 +1077,10 @@ class GameEngine(
             isWildcard = false,
             isAnchor = true
         )
+        movesWithoutStencilProgress = 0
+        helpTargetSlot = null
+        isHelpPieceActive = false
+        helpPieceTargetLetterIndex = -1
 
         checkStencilCompletion()
         return true
@@ -1044,16 +1185,20 @@ class GameEngine(
 
     /**
      * Generates friendly letters for a falling piece:
-     * Always includes the missing letter(s) needed for the active Crossword Stencil!
+     * Always includes the missing letter(s) needed for the active Crossword Stencil on a bottom-edge cell!
      */
-    private fun generateBalancedPieceLetters(count: Int): List<Char> {
+    private fun generateBalancedPieceLetters(count: Int, forShapeType: Int = TetrominoShapes.SINGLE_TILE_SHAPE): List<Char> {
         val pieceLetters = mutableListOf<Char>()
         val vowels = if (isRussian) "АЕИОУЯ" else "AEIOU"
         val consonants = if (isRussian) "БВДГКЛМНПРСТЧШ" else "TNSRLDMCGPKB"
 
         val missingStencilChars = stencilSlots.mapNotNull { slot ->
             val cell = if (isValidPoint(slot.x, slot.y)) board[slot.y][slot.x] else null
-            if (cell == null || cell.char != slot.expectedChar) slot.expectedChar else null
+            val isMatched = cell != null && (
+                cell.char == Dictionary.WILDCARD_CHAR ||
+                    Dictionary.normalizeYo(cell.char.toString()) == Dictionary.normalizeYo(slot.expectedChar.toString())
+            )
+            if (!isMatched) slot.expectedChar else null
         }
 
         if (count == 1) {
@@ -1065,12 +1210,15 @@ class GameEngine(
             return listOf(singleChar)
         }
 
+        val offsetsRot0 = TetrominoShapes.getOffsets(forShapeType, 0)
+        val bottomCellIndex = offsetsRot0.indices.maxByOrNull { offsetsRot0[it].second } ?: 0
+
         for (i in 0 until count) {
             if (giftLettersQueue.isNotEmpty()) {
                 pieceLetters.add(giftLettersQueue.removeAt(0))
-            } else if (i == 0 && missingStencilChars.isNotEmpty()) {
-                pieceLetters.add(missingStencilChars.random(random))
-            } else if (i == 1 && random.nextFloat() < 0.16f) {
+            } else if (i == bottomCellIndex && missingStencilChars.isNotEmpty()) {
+                pieceLetters.add(missingStencilChars.first())
+            } else if (i != bottomCellIndex && random.nextFloat() < 0.16f) {
                 pieceLetters.add(Dictionary.WILDCARD_CHAR)
             } else if (random.nextFloat() < 0.75f && levelTargetWords.isNotEmpty()) {
                 val word = levelTargetWords.random(random)
@@ -1082,28 +1230,529 @@ class GameEngine(
         }
 
         if (pieceLetters.none { it in vowels || it == Dictionary.WILDCARD_CHAR }) {
-            pieceLetters[random.nextInt(pieceLetters.size)] = vowels.random(random)
+            val nonBottomIdx = (0 until count).firstOrNull { it != bottomCellIndex } ?: 0
+            pieceLetters[nonBottomIdx] = vowels.random(random)
         }
         return pieceLetters
     }
 
-    fun spawnPiece(customShape: Int? = null, customLetters: List<Char>? = null) {
+    /**
+     * Checks whether [slot] is currently an Open Gap (Открытая лунка):
+     * empty or not containing a matching letter / wildcard.
+     */
+    fun isStencilSlotOpen(slot: StencilSlot): Boolean {
+        if (!isValidPoint(slot.x, slot.y)) return false
+        val cell = board[slot.y][slot.x] ?: return true
+        if (cell.char == Dictionary.WILDCARD_CHAR) return false
+        return Dictionary.normalizeYo(cell.char.toString()) != Dictionary.normalizeYo(slot.expectedChar.toString())
+    }
+
+    /**
+     * Checks whether [slot] is a Closed Open Gap (Закрытая лунка):
+     * an open stencil slot that has at least one occupied cell above it in its column (0 until slot.y),
+     * blocking the vertical path from the top of the board.
+     */
+    fun isStencilSlotClosed(slot: StencilSlot): Boolean {
+        if (!isStencilSlotOpen(slot)) return false
+        for (r in 0 until slot.y) {
+            if (board[r][slot.x] != null) return true
+        }
+        return false
+    }
+
+    /**
+     * Returns all currently open stencil slots ordered in word reading order
+     * (left-to-right for horizontal words, top-to-bottom for vertical words).
+     */
+    fun getOpenStencilSlotsInReadingOrder(): List<StencilSlot> {
+        return stencilSlots
+            .filter { isStencilSlotOpen(it) }
+            .sortedWith(compareBy<StencilSlot> { !it.isHorizontal }.thenBy { it.x }.thenBy { it.y })
+    }
+
+    /**
+     * Returns all currently closed open stencil slots ordered in word reading order.
+     */
+    fun getClosedOpenStencilSlotsInReadingOrder(): List<StencilSlot> {
+        return getOpenStencilSlotsInReadingOrder().filter { isStencilSlotClosed(it) }
+    }
+
+    /**
+     * Returns true if the tower is high (at least one occupied cell with y <= TOWER_WARNING_ROW, i.e., y <= 4).
+     */
+    fun isTowerHigh(): Boolean {
+        val maxRow = TOWER_WARNING_ROW.coerceAtMost(rows - 1)
+        for (r in 0..maxRow) {
+            for (c in 0 until cols) {
+                if (board[r][c] != null) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Returns true if the tower is critical (at least one occupied cell with y <= SPAWN_ZONE_ROW, i.e., y <= 2).
+     */
+    fun isTowerCritical(): Boolean {
+        val maxRow = SPAWN_ZONE_ROW.coerceAtMost(rows - 1)
+        for (r in 0..maxRow) {
+            for (c in 0 until cols) {
+                if (board[r][c] != null) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Returns true if (col, row) holds a stencil anchor tile or a letter already matched inside a stencil slot.
+     * These cells must NEVER be deleted or moved by tower protection or path clearing!
+     */
+    fun isProtectedStencilOrSlotCell(col: Int, row: Int): Boolean {
+        if (!isValidPoint(col, row)) return false
+        val cell = board[row][col] ?: return false
+        if (cell.isAnchor) return true
+        val slot = stencilSlots.firstOrNull { it.x == col && it.y == row }
+        if (slot != null && !isStencilSlotOpen(slot)) {
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Updates isTowerWarningActive whenever the board changes:
+     * Warning banner stays active while the tower is high (y <= 4) and there are no closed open slots,
+     * and is shown at most once per turn.
+     */
+    fun updateTowerWarningStateAfterBoardChange(isNewTurn: Boolean = false) {
+        val high = isTowerHigh()
+        val hasClosedSlots = getClosedOpenStencilSlotsInReadingOrder().isNotEmpty()
+        if (high && (!hasClosedSlots || paceMode == PaceMode.ARCADE)) {
+            isTowerWarningActive = true
+            if (isNewTurn || !towerWarningShownThisTurn) {
+                towerWarningShownThisTurn = true
+                lastTowerWarningMessage = formatTowerHighWarningMessage()
+            }
+        } else {
+            isTowerWarningActive = false
+            lastTowerWarningMessage = null
+        }
+    }
+
+    fun formatNoProgressHelpMessage(letter: Char, removedCount: Int = 0): String {
+        val base = if (isRussian) {
+            "Помощь: буква «$letter» открывает путь к лунке"
+        } else {
+            "Help: the letter «$letter» opens the way to the gap"
+        }
+        return if (removedCount > 0) {
+            "$base. ${formatPathClearedBlocksRemovedMessage(removedCount)}"
+        } else {
+            base
+        }
+    }
+
+    fun formatPathClearedBlocksRemovedMessage(removedCount: Int): String {
+        return if (isRussian) {
+            "Путь к лунке освобождён, убрано блоков: $removedCount"
+        } else {
+            "Path to the gap cleared, blocks removed: $removedCount"
+        }
+    }
+
+    fun formatWrongSlotLetterMessage(): String {
+        return if (isRussian) {
+            "Эта буква сюда не подходит"
+        } else {
+            "This letter doesn't fit here"
+        }
+    }
+
+    fun formatTowerHighWarningMessage(): String {
+        return if (isRussian) {
+            "Башня близко к верху. Соберите слово или отмените ход"
+        } else {
+            "The tower is close to the top. Complete the word or undo the move"
+        }
+    }
+
+    fun formatProtectionBlocksRemovedMessage(removedCount: Int): String {
+        return if (isRussian) {
+            "Освобождён верх поля: убрано блоков — $removedCount"
+        } else {
+            "Top of the board cleared: blocks removed — $removedCount"
+        }
+    }
+
+    fun formatProtectionPieceToHoldMessage(): String {
+        return if (isRussian) {
+            "Фигура отложена в карман"
+        } else {
+            "The piece was moved to the pocket"
+        }
+    }
+
+    fun formatProtectionPieceToQueueMessage(): String {
+        return if (isRussian) {
+            "Фигура возвращена в очередь"
+        } else {
+            "The piece was returned to the queue"
+        }
+    }
+
+    /**
+     * Relocates a single blocking cell at ([col], [row]) to the nearest free cell on the same row
+     * (checking left first, then right) or a safe row > SPAWN_ZONE_ROW that does not close or occupy any open slot.
+     * Avoids placing blocks into the critical spawn zone (rows 0..SPAWN_ZONE_ROW).
+     * Never moves or removes stencil blocks, anchors, or letters matched in stencil slots.
+     * If lossless relocation is impossible and [allowRemove] is true, removes only that cell and records it for fade-out.
+     * Returns true if relocated without loss (or already empty/protected), false if not relocated.
+     */
+    fun relocateOrRemoveBlockingCell(
+        col: Int,
+        row: Int,
+        openSlots: List<StencilSlot> = getOpenStencilSlotsInReadingOrder(),
+        recordFade: Boolean = true,
+        allowRemove: Boolean = true
+    ): Boolean {
+        if (!isValidPoint(col, row)) return true
+        val cell = board[row][col] ?: return true
+        if (isProtectedStencilOrSlotCell(col, row)) return true
+
+        val openSlotMaxYByCol = openSlots.groupBy { it.x }.mapValues { (_, list) -> list.maxOf { it.y } }
+
+        fun isValidTargetCell(candCol: Int, candRow: Int): Boolean {
+            if (!isValidPoint(candCol, candRow)) return false
+            if (candCol == col && candRow == row) return false
+            if (candRow <= SPAWN_ZONE_ROW) return false
+            if (board[candRow][candCol] != null) return false
+            // Never place a relocated block above or inside any open slot
+            val maxOpenY = openSlotMaxYByCol[candCol]
+            if (maxOpenY != null && candRow <= maxOpenY) return false
+            // Never overwrite any stencil slot coordinate with a non-matching relocated block
+            if (stencilSlots.any { it.x == candCol && it.y == candRow }) return false
+            return true
+        }
+
+        // 1. Prefer relocating on the exact same row (if row > SPAWN_ZONE_ROW so we never place into rows 0..2)
+        if (row > SPAWN_ZONE_ROW) {
+            for (dist in 1 until cols) {
+                val leftCol = col - dist
+                val rightCol = col + dist
+                if (isValidTargetCell(leftCol, row)) {
+                    board[row][leftCol] = cell
+                    board[row][col] = null
+                    return true
+                }
+                if (isValidTargetCell(rightCol, row)) {
+                    board[row][rightCol] = cell
+                    board[row][col] = null
+                    return true
+                }
+            }
+        }
+
+        // 2. Otherwise search safe rows (rows - 1 downTo SPAWN_ZONE_ROW + 1) so relocated blocks settle onto the lowest free safe row
+        for (safeRow in (rows - 1) downTo (SPAWN_ZONE_ROW + 1)) {
+            if (row <= SPAWN_ZONE_ROW && isValidTargetCell(col, safeRow)) {
+                board[safeRow][col] = cell
+                board[row][col] = null
+                return true
+            }
+            for (dist in 1 until cols) {
+                val leftCol = col - dist
+                val rightCol = col + dist
+                if (isValidTargetCell(leftCol, safeRow)) {
+                    board[safeRow][leftCol] = cell
+                    board[row][col] = null
+                    return true
+                }
+                if (isValidTargetCell(rightCol, safeRow)) {
+                    board[safeRow][rightCol] = cell
+                    board[row][col] = null
+                    return true
+                }
+            }
+        }
+
+        if (!allowRemove) {
+            return false
+        }
+
+        // 3. Minimal removal if no free cell is available anywhere in safe rows
+        board[row][col] = null
+        if (recordFade) {
+            lastRemovedCellsForFade.add(
+                FadingBoardCell(
+                    x = col,
+                    y = row,
+                    char = cell.char,
+                    colorHex = cell.colorHex
+                )
+            )
+        }
+        return false
+    }
+
+    /**
+     * Problem 1 Invariant:
+     * Ensures that no open stencil slot (Открытая лунка) is closed by remnants (Остатки) above it
+     * or occupied by a non-matching block.
+     * Processes open slots left-to-right in reading order:
+     *  - First relocates blocking blocks to the nearest free cell on the same row (left, then right) or a safe row.
+     *  - Only removes a blocking block if no free cell exists, recording the removed count and fade-out cells.
+     *  - Never touches stencil blocks, anchors, or letters already matched inside stencil slots.
+     */
+    fun ensureOpenSlotsUnobstructedByRemnants(recordNotifications: Boolean = true): Int {
+        val openSlots = getOpenStencilSlotsInReadingOrder()
+        if (openSlots.isEmpty()) return 0
+
+        var removedCount = 0
+        for (slot in openSlots) {
+            for (r in 0..slot.y) {
+                if (board[r][slot.x] == null) continue
+                // Never move or remove a protected stencil cell, anchor, or matched letter in a slot
+                if (isProtectedStencilOrSlotCell(slot.x, r)) continue
+                val relocated = relocateOrRemoveBlockingCell(
+                    col = slot.x,
+                    row = r,
+                    openSlots = openSlots,
+                    recordFade = recordNotifications,
+                    allowRemove = true
+                )
+                if (!relocated) {
+                    removedCount++
+                }
+            }
+        }
+
+        if (removedCount > 0 && recordNotifications) {
+            lastRemovedBlocksCount += removedCount
+            lastPathClearedMessage = formatPathClearedBlocksRemovedMessage(lastRemovedBlocksCount)
+        }
+        return removedCount
+    }
+
+    /**
+     * Checks if any rotation (0..3) of [piece] has the needed letter for [slot] on its bottom edge
+     * AND has an unobstructed vertical drop path from top (y = 1) into (slot.x, slot.y).
+     */
+    fun canPieceCloseOpenSlot(piece: ActivePiece, slot: StencilSlot): Boolean {
+        if (!isStencilSlotOpen(slot)) return false
+        for (rot in 0..3) {
+            val offsets = TetrominoShapes.getOffsets(piece.shapeType, rot)
+            for (i in offsets.indices) {
+                val ch = piece.letters.getOrElse(i) { ' ' }
+                val matchesChar = ch == Dictionary.WILDCARD_CHAR ||
+                    Dictionary.normalizeYo(ch.toString()) == Dictionary.normalizeYo(slot.expectedChar.toString())
+                if (!matchesChar) continue
+
+                val (dx, dy) = offsets[i]
+                // Must be on the bottom edge of its column in this rotation
+                val isBottomEdgeInCol = offsets.none { other -> other.first == dx && other.second > dy }
+                if (!isBottomEdgeInCol) continue
+
+                val targetOriginX = slot.x - dx
+                val targetOriginY = slot.y - dy
+                val startOriginY = 1
+                if (targetOriginY < startOriginY) continue
+
+                var pathClear = true
+                for (testY in startOriginY..targetOriginY) {
+                    val testPiece = piece.copy(x = targetOriginX, y = testY, rotation = rot)
+                    if (checkCollision(testPiece)) {
+                        pathClear = false
+                        break
+                    }
+                }
+                if (pathClear) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Checks whether the given [piece] can close at least one currently open stencil slot in some rotation.
+     */
+    fun canPieceCloseAnyOpenSlot(piece: ActivePiece): Boolean {
+        val openSlots = getOpenStencilSlotsInReadingOrder()
+        if (openSlots.isEmpty()) return true
+        return openSlots.any { slot -> canPieceCloseOpenSlot(piece, slot) }
+    }
+
+    /**
+     * Clears any non-anchor blocks above [slot] that block the vertical drop path into (slot.x, slot.y),
+     * first attempting lossless horizontal relocation (Problem 1 rule a) and only removing blocks if no free cell exists (rule b).
+     * Never deletes stencil blocks, anchors, or letters matched in slots.
+     * Returns the number of blocks that had to be removed.
+     */
+    fun openVerticalPathToSlot(slot: StencilSlot, recordNotifications: Boolean = true): Int {
+        if (!isValidPoint(slot.x, slot.y)) return 0
+        val openSlots = getOpenStencilSlotsInReadingOrder()
+        var removedCount = 0
+        for (r in 0..slot.y) {
+            if (board[r][slot.x] == null) continue
+            if (isProtectedStencilOrSlotCell(slot.x, r)) continue
+            val relocated = relocateOrRemoveBlockingCell(
+                col = slot.x,
+                row = r,
+                openSlots = openSlots,
+                recordFade = recordNotifications,
+                allowRemove = true
+            )
+            if (!relocated) {
+                removedCount++
+            }
+        }
+        if (removedCount > 0 && recordNotifications) {
+            lastRemovedBlocksCount += removedCount
+            lastPathClearedMessage = formatPathClearedBlocksRemovedMessage(lastRemovedBlocksCount)
+        }
+        return removedCount
+    }
+
+    /**
+     * Pre-generates or refreshes nextPieceShapeType and nextPieceLetters so the "СЛЕД" preview
+     * always shows the upcoming piece and its letters accurately.
+     */
+    fun refreshNextPiecePreview() {
+        nextPieceShapeType = if (isSingleTileMode) {
+            TetrominoShapes.SINGLE_TILE_SHAPE
+        } else {
+            nextPieceShapeType.coerceIn(0, 6)
+        }
+        val count = if (nextPieceShapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
+        if (nextPieceLetters.size != count) {
+            nextPieceLetters = generateBalancedPieceLetters(count, forShapeType = nextPieceShapeType)
+        } else {
+            val openSlot = getOpenStencilSlotsInReadingOrder().firstOrNull()
+            if (openSlot != null) {
+                val hasNeeded = nextPieceLetters.any { ch ->
+                    ch == Dictionary.WILDCARD_CHAR ||
+                        Dictionary.normalizeYo(ch.toString()) == Dictionary.normalizeYo(openSlot.expectedChar.toString())
+                }
+                if (!hasNeeded) {
+                    val offsetsRot0 = TetrominoShapes.getOffsets(nextPieceShapeType, 0)
+                    val bottomIdx = offsetsRot0.indices.maxByOrNull { offsetsRot0[it].second } ?: 0
+                    val updated = nextPieceLetters.toMutableList()
+                    updated[bottomIdx] = openSlot.expectedChar
+                    nextPieceLetters = updated
+                }
+            }
+        }
+    }
+
+    private fun createNextPieceFromQueue(): ActivePiece {
+        val openSlots = getOpenStencilSlotsInReadingOrder()
+        val shapeType = if (isSingleTileMode) TetrominoShapes.SINGLE_TILE_SHAPE else nextPieceShapeType
+        val letterCount = if (shapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
+        val pieceLetters = if (nextPieceLetters.size == letterCount) {
+            nextPieceLetters
+        } else {
+            generateBalancedPieceLetters(letterCount, forShapeType = shapeType)
+        }
+        nextPieceShapeType = if (isSingleTileMode) TetrominoShapes.SINGLE_TILE_SHAPE else random.nextInt(7)
+        val nextCount = if (nextPieceShapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
+        nextPieceLetters = generateBalancedPieceLetters(nextCount, forShapeType = nextPieceShapeType)
+
+        val startX = openSlots.firstOrNull()?.x ?: (cols / 2)
+        return ActivePiece(
+            shapeType = shapeType,
+            x = startX,
+            y = 1,
+            rotation = 0,
+            letters = pieceLetters
+        )
+    }
+
+    fun spawnPiece(
+        customShape: Int? = null,
+        customLetters: List<Char>? = null,
+        forceNoProgressHelp: Boolean = false
+    ) {
+        val openSlots = getOpenStencilSlotsInReadingOrder()
+        val closedOpenSlots = openSlots.filter { isStencilSlotClosed(it) }
+        val targetClosedSlot = closedOpenSlots.firstOrNull()
+        val highTower = isTowerHigh()
+
+        // Rule 2a & Problem 2 (NoProgressHelp):
+        // Triggers when (movesWithoutStencilProgress >= NO_PROGRESS_LIMIT OR highTower (y <= 4) OR forceNoProgressHelp)
+        // AND there is at least one closed open slot!
+        val triggerNoProgressHelp = customShape == null && customLetters == null &&
+            targetClosedSlot != null &&
+            (forceNoProgressHelp || movesWithoutStencilProgress >= NO_PROGRESS_LIMIT || highTower)
+
+        var removedDuringHelp = 0
+        if (triggerNoProgressHelp && targetClosedSlot != null) {
+            removedDuringHelp = openVerticalPathToSlot(targetClosedSlot, recordNotifications = true)
+            // If tower is high/critical during help, also relocate any blocks in rows 0..SPAWN_ZONE_ROW without deleting them
+            for (r in 0..SPAWN_ZONE_ROW.coerceAtMost(rows - 1)) {
+                for (c in 0 until cols) {
+                    if (board[r][c] != null && !isProtectedStencilOrSlotCell(c, r)) {
+                        relocateOrRemoveBlockingCell(
+                            col = c,
+                            row = r,
+                            openSlots = openSlots,
+                            recordFade = false,
+                            allowRemove = false
+                        )
+                    }
+                }
+            }
+        }
+
         val shapeType = when {
             customShape != null -> customShape
             isSingleTileMode -> TetrominoShapes.SINGLE_TILE_SHAPE
+            triggerNoProgressHelp -> 0 // Vertical I-piece fits any 1-cell-wide open slot cleanly
             else -> nextPieceShapeType
         }
-        if (customShape == null) {
-            nextPieceShapeType = if (isSingleTileMode) TetrominoShapes.SINGLE_TILE_SHAPE else random.nextInt(7)
+
+        val letterCount = if (shapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
+        val offsetsRot0 = TetrominoShapes.getOffsets(shapeType, 0)
+        val bottomIndex = offsetsRot0.indices.maxByOrNull { offsetsRot0[it].second } ?: 0
+
+        val pieceLetters: List<Char> = when {
+            customLetters != null -> customLetters
+            triggerNoProgressHelp && targetClosedSlot != null -> {
+                val base = generateBalancedPieceLetters(letterCount, forShapeType = shapeType).toMutableList()
+                base[bottomIndex] = targetClosedSlot.expectedChar
+                base
+            }
+            nextPieceLetters.size == letterCount -> nextPieceLetters
+            else -> generateBalancedPieceLetters(letterCount, forShapeType = shapeType)
         }
 
-        val missingSlotX = stencilSlots.firstOrNull { slot ->
-            isValidPoint(slot.x, slot.y) && board[slot.y][slot.x] == null
-        }?.x
-        val startX = missingSlotX ?: (cols / 2)
+        if (triggerNoProgressHelp && targetClosedSlot != null) {
+            isHelpPieceActive = true
+            helpTargetSlot = GridPoint(targetClosedSlot.x, targetClosedSlot.y)
+            helpPieceTargetLetterIndex = bottomIndex
+            lastHelpTriggered = true
+            lastHelpTargetChar = targetClosedSlot.expectedChar
+            lastHelpMessage = formatNoProgressHelpMessage(targetClosedSlot.expectedChar, removedDuringHelp)
+            if (paceMode == PaceMode.ARCADE) {
+                updateTowerWarningStateAfterBoardChange()
+            } else {
+                isTowerWarningActive = false
+                lastTowerWarningMessage = null
+            }
+        } else if (customShape == null && customLetters == null) {
+            isHelpPieceActive = false
+            helpTargetSlot = null
+            helpPieceTargetLetterIndex = -1
+        }
+
+        if (customShape == null) {
+            nextPieceShapeType = if (isSingleTileMode) TetrominoShapes.SINGLE_TILE_SHAPE else random.nextInt(7)
+            val nextCount = if (nextPieceShapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
+            nextPieceLetters = generateBalancedPieceLetters(nextCount, forShapeType = nextPieceShapeType)
+        } else if (nextPieceLetters.isEmpty()) {
+            val nextCount = if (nextPieceShapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
+            nextPieceLetters = generateBalancedPieceLetters(nextCount, forShapeType = nextPieceShapeType)
+        }
+
+        val targetSlotForSpawnX = if (triggerNoProgressHelp) targetClosedSlot else openSlots.firstOrNull()
+        val startX = targetSlotForSpawnX?.x ?: (cols / 2)
         val startY = 1
-        val letterCount = if (shapeType == TetrominoShapes.SINGLE_TILE_SHAPE) 1 else 4
-        val pieceLetters = customLetters ?: generateBalancedPieceLetters(letterCount)
 
         val piece = ActivePiece(
             shapeType = shapeType,
@@ -1113,17 +1762,27 @@ class GameEngine(
             letters = pieceLetters
         )
 
-        canHoldThisTurn = true
+        // Requirement 4.4: If the spawn zone of the help piece is occupied, clear it first using Problem 1 rules
+        if (triggerNoProgressHelp && checkCollision(piece)) {
+            for (pt in piece.getPoints()) {
+                if (isValidPoint(pt.x, pt.y) && board[pt.y][pt.x] != null && !isProtectedStencilOrSlotCell(pt.x, pt.y)) {
+                    relocateOrRemoveBlockingCell(pt.x, pt.y, openSlots, recordFade = true, allowRemove = true)
+                }
+            }
+        }
 
-        if (checkCollision(piece)) {
+        canHoldThisTurn = true
+        activePiece = piece
+
+        if (checkCollision(piece) && !triggerNoProgressHelp) {
             if (paceMode != PaceMode.ARCADE) {
-                softClearTopRowsForFamily()
-                activePiece = piece
+                if (!protectionTriggeredInCurrentLock) {
+                    protectionTriggeredInCurrentLock = true
+                    softClearTopRowsForFamily(alreadySavedUndo = true)
+                }
             } else {
                 handleArcadeTopReached()
             }
-        } else {
-            activePiece = piece
         }
     }
 
@@ -1148,19 +1807,144 @@ class GameEngine(
     }
 
     /**
-     * Gentle "No-Lose" safety net for seniors, moms, and children:
-     * Clears old anchors and top rows so the game never abruptly ends in frustration.
+     * Critical Tower Protection (Section 2в):
+     * 1) Relocates player blocks from critical rows 0..SPAWN_ZONE_ROW (0..2) into free safe cells via relocateOrRemoveBlockingCell.
+     * 2) If relocation is impossible: removes at most ONE row per trigger — only from the topmost occupied row in 0..2,
+     *    and only player blocks. Stencil blocks, anchors, and letters in stencil slots are NEVER deleted.
+     * 3) Preserves the falling piece: moves it to the Hold Pocket if empty, or returns it to the next-piece queue if Pocket is occupied.
+     * 4) Does not award points and does not modify comboCount.
+     * 5) Records the exact number N of removed blocks for the banner message, and ensures all open slots remain open.
      */
-    fun softClearTopRowsForFamily() {
-        clearExistingAnchorsFromBoard()
-        for (r in 0 until (rows - 4)) {
+    fun softClearTopRowsForFamily(alreadySavedUndo: Boolean = false) {
+        if (!alreadySavedUndo) {
+            saveUndoSnapshot()
+        }
+        towerProtectionTriggerCount++
+        lastSafetyClearTriggered = true
+
+        val openSlots = getOpenStencilSlotsInReadingOrder()
+        val openSlotMaxYByCol = openSlots.groupBy { it.x }.mapValues { (_, list) -> list.maxOf { it.y } }
+
+        // 1) First try lossless relocation of player blocks from rows 0..SPAWN_ZONE_ROW into safe rows > SPAWN_ZONE_ROW
+        val maxCriticalRow = SPAWN_ZONE_ROW.coerceAtMost(rows - 1)
+        for (r in 0..maxCriticalRow) {
             for (c in 0 until cols) {
-                board[r][c] = null
+                if (board[r][c] != null && !isProtectedStencilOrSlotCell(c, r)) {
+                    relocateOrRemoveBlockingCell(
+                        col = c,
+                        row = r,
+                        openSlots = openSlots,
+                        recordFade = false,
+                        allowRemove = false
+                    )
+                }
             }
         }
-        applyGravityToStackedBlocks()
-        placeCrosswordStencilOnBoard()
-        lastSafetyClearTriggered = true
+
+        // 2) If relocation was impossible (tower is still critical), delete at most ONE row:
+        //    only from the topmost occupied row among 0..SPAWN_ZONE_ROW, and only player blocks!
+        var removedCount = 0
+        if (isTowerCritical()) {
+            val topOccupiedRow = (0..maxCriticalRow).firstOrNull { r ->
+                (0 until cols).any { c -> board[r][c] != null && !isProtectedStencilOrSlotCell(c, r) }
+            }
+            if (topOccupiedRow != null) {
+                for (c in 0 until cols) {
+                    val cell = board[topOccupiedRow][c] ?: continue
+                    if (isProtectedStencilOrSlotCell(c, topOccupiedRow)) continue
+                    board[topOccupiedRow][c] = null
+                    removedCount++
+                    lastRemovedCellsForFade.add(
+                        FadingBoardCell(
+                            x = c,
+                            y = topOccupiedRow,
+                            char = cell.char,
+                            colorHex = cell.colorHex
+                        )
+                    )
+                }
+            }
+        }
+
+        // 2д) Ensure no open stencil slot is closed after protection:
+        // First relocate any blocking player cells above open slots into safe rows (or into any free non-open-slot cell if safe rows are full)
+        for (slot in openSlots) {
+            for (r in 0..slot.y) {
+                val cell = board[r][slot.x] ?: continue
+                if (isProtectedStencilOrSlotCell(slot.x, r)) continue
+                val relocatedToSafe = relocateOrRemoveBlockingCell(
+                    col = slot.x,
+                    row = r,
+                    openSlots = openSlots,
+                    recordFade = false,
+                    allowRemove = false
+                )
+                if (!relocatedToSafe) {
+                    // Try relocating to any free cell on the board outside open slot columns so we don't delete extra rows
+                    var movedToAnyFree = false
+                    outer@ for (candRow in (rows - 1) downTo 0) {
+                        for (dist in 1 until cols) {
+                            val leftCol = slot.x - dist
+                            val rightCol = slot.x + dist
+                            for (candCol in listOf(leftCol, rightCol)) {
+                                if (!isValidPoint(candCol, candRow)) continue
+                                if (board[candRow][candCol] != null) continue
+                                val maxOpenY = openSlotMaxYByCol[candCol]
+                                if (maxOpenY != null && candRow <= maxOpenY) continue
+                                if (stencilSlots.any { it.x == candCol && it.y == candRow }) continue
+                                board[candRow][candCol] = cell
+                                board[r][slot.x] = null
+                                movedToAnyFree = true
+                                break@outer
+                            }
+                        }
+                    }
+                    if (!movedToAnyFree) {
+                        board[r][slot.x] = null
+                        removedCount++
+                        lastRemovedCellsForFade.add(
+                            FadingBoardCell(
+                                x = slot.x,
+                                y = r,
+                                char = cell.char,
+                                colorHex = cell.colorHex
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3) Never lose the falling piece: move to Hold Pocket if empty, else return to Next Queue
+        val falling = activePiece
+        if (falling != null) {
+            val isPocketEmpty = heldPieceShapeType == null || heldPieceLetters.isNullOrEmpty()
+            if (isPocketEmpty) {
+                heldPieceShapeType = falling.shapeType
+                heldPieceLetters = falling.letters.toList()
+                lastProtectionPieceToHold = true
+                lastProtectionPieceToQueue = false
+                lastProtectionPieceMessage = formatProtectionPieceToHoldMessage()
+                activePiece = createNextPieceFromQueue()
+            } else {
+                nextPieceShapeType = falling.shapeType
+                nextPieceLetters = falling.letters.toList()
+                lastProtectionPieceToHold = false
+                lastProtectionPieceToQueue = true
+                lastProtectionPieceMessage = formatProtectionPieceToQueueMessage()
+            }
+        }
+
+        // 4) Score and comboCount are NOT modified.
+        // 5) Record exact removed block count for the protection banner.
+        lastProtectionRemovedBlocksCount = removedCount
+        if (removedCount > 0) {
+            lastProtectionMessage = formatProtectionBlocksRemovedMessage(removedCount)
+        } else {
+            lastProtectionMessage = null
+        }
+
+        updateTowerWarningStateAfterBoardChange()
     }
 
     fun shiftPieceLetters(): Boolean {
@@ -1176,6 +1960,9 @@ class GameEngine(
         }
         val shifted = listOf(piece.letters.last()) + piece.letters.dropLast(1)
         activePiece = piece.copy(letters = shifted)
+        if (isHelpPieceActive && helpPieceTargetLetterIndex in piece.letters.indices) {
+            helpPieceTargetLetterIndex = (helpPieceTargetLetterIndex + 1) % piece.letters.size
+        }
         return true
     }
 
@@ -1188,6 +1975,9 @@ class GameEngine(
 
         heldPieceShapeType = current.shapeType
         heldPieceLetters = current.letters
+        isHelpPieceActive = false
+        helpTargetSlot = null
+        helpPieceTargetLetterIndex = -1
 
         if (prevHeldShape != null && prevHeldLetters != null) {
             spawnPiece(customShape = prevHeldShape, customLetters = prevHeldLetters)
@@ -1198,20 +1988,34 @@ class GameEngine(
         return true
     }
 
-    fun getGhostPiecePoints(): List<GridPoint> {
-        var ghost = activePiece ?: return emptyList()
+    /**
+     * Single source of truth for vertical landing calculation (Problem 3):
+     * Computes the exact origin row `y` where [piece] stops when dropped straight down on [currentBoard].
+     * Used by BOTH the landing shadow (`getGhostPiecePoints`) and `hardDrop()`.
+     */
+    fun landingRow(piece: ActivePiece, currentBoard: Array<Array<GameCell?>> = board): Int {
+        var currentY = piece.y
         while (true) {
-            val next = ghost.copy(y = ghost.y + 1)
-            if (checkCollision(next)) break
-            ghost = next
+            val next = piece.copy(y = currentY + 1)
+            if (checkCollision(next, currentBoard)) break
+            currentY++
         }
-        return ghost.getPoints()
+        return currentY
     }
 
-    fun checkCollision(piece: ActivePiece): Boolean {
+    /**
+     * Returns the landing coordinates of the active piece (Тень / Ghost Piece) using [landingRow].
+     */
+    fun getGhostPiecePoints(): List<GridPoint> {
+        val piece = activePiece ?: return emptyList()
+        val targetY = landingRow(piece, board)
+        return piece.copy(y = targetY).getPoints()
+    }
+
+    fun checkCollision(piece: ActivePiece, currentBoard: Array<Array<GameCell?>> = board): Boolean {
         for (point in piece.getPoints()) {
             if (!isValidPoint(point.x, point.y)) return true
-            if (point.y >= 0 && board[point.y][point.x] != null) return true
+            if (point.y >= 0 && currentBoard[point.y][point.x] != null) return true
         }
         return false
     }
@@ -1248,11 +2052,11 @@ class GameEngine(
     }
 
     fun hardDrop() {
+        val piece = activePiece ?: return
         saveUndoSnapshot()
-        var dropSteps = 0
-        while (movePiece(0, 1)) {
-            dropSteps++
-        }
+        val targetY = landingRow(piece, board)
+        val dropSteps = (targetY - piece.y).coerceAtLeast(0)
+        activePiece = piece.copy(y = targetY)
         score += dropSteps * 2
         lockPiece(alreadySavedUndo = true)
     }
@@ -1262,7 +2066,35 @@ class GameEngine(
         if (!alreadySavedUndo) {
             saveUndoSnapshot()
         }
+
+        val openSlotsBeforeLock = getOpenStencilSlotsInReadingOrder()
+        val openSlotCountBefore = openSlotsBeforeLock.size
         val points = piece.getPoints()
+
+        // Item 3 / T8: Check if any cell of the locked piece landed in a previously open stencil slot with a wrong letter
+        val wrongLetterInOpenSlot = points.indices.any { i ->
+            val p = points[i]
+            val char = piece.letters.getOrElse(i) { 'A' }
+            val slotAtPoint = openSlotsBeforeLock.firstOrNull { it.x == p.x && it.y == p.y }
+            slotAtPoint != null &&
+                char != Dictionary.WILDCARD_CHAR &&
+                Dictionary.normalizeYo(char.toString()) != Dictionary.normalizeYo(slotAtPoint.expectedChar.toString())
+        }
+
+        if (wrongLetterInOpenSlot) {
+            undoLastMove()
+            val startX = openSlotsBeforeLock.firstOrNull()?.x ?: (cols / 2)
+            activePiece = piece.copy(x = startX, y = 1, rotation = 0)
+            lastWrongSlotLetterWarning = true
+            lastWrongSlotLetterMessage = formatWrongSlotLetterMessage()
+            return
+        }
+
+        val wasHelpPiece = isHelpPieceActive
+        isHelpPieceActive = false
+        helpTargetSlot = null
+        helpPieceTargetLetterIndex = -1
+
         val baseColor = TetrominoShapes.COLORS[piece.shapeType % TetrominoShapes.COLORS.size]
 
         for (i in points.indices) {
@@ -1291,24 +2123,75 @@ class GameEngine(
 
         // 3. Check standard Tetris completed horizontal lines (only if stencil didn't just reset the board)
         if (!wordOrStencilCleared) {
+            val questBeforeLines = questWordDefinition?.word
             checkCompletedLines()
-        }
-
-        var topReached = false
-        for (col in 0 until cols) {
-            if (board[0][col] != null || board[1][col] != null || board[2][col] != null) {
-                topReached = true
-                break
+            if (stencilSlots.isNotEmpty()) {
+                if (checkStencilCompletion()) {
+                    wordOrStencilCleared = true
+                } else if (questWordDefinition?.word != questBeforeLines) {
+                    wordOrStencilCleared = true
+                }
             }
         }
 
-        if (topReached) {
-            if (paceMode != PaceMode.ARCADE) {
-                softClearTopRowsForFamily()
-                spawnPiece()
-            } else {
+        val openSlotCountAfter = stencilSlots.count { isStencilSlotOpen(it) }
+        val madeProgress = wordOrStencilCleared || openSlotCountAfter < openSlotCountBefore
+        if (madeProgress) {
+            movesWithoutStencilProgress = 0
+        } else if (wasHelpPiece) {
+            // Help piece was locked without filling the target slot; start counting toward next help cycle
+            movesWithoutStencilProgress = 1
+        } else {
+            movesWithoutStencilProgress++
+        }
+
+        protectionTriggeredInCurrentLock = false
+        towerWarningShownThisTurn = false
+
+        val highTower = isTowerHigh()
+        val criticalTower = isTowerCritical()
+        val closedSlotsAfter = getClosedOpenStencilSlotsInReadingOrder()
+        val hasClosedSlot = closedSlotsAfter.isNotEmpty()
+
+        // In Arcade mode:
+        // - Show high tower warning banner when y <= 4 so the player sees the danger;
+        // - Never apply soft row-deletion protection;
+        // - Try NoProgressHelp first when y <= 4 (including critical zone y <= 2) if an open slot is closed and the locked piece was not a help piece;
+        // - At critical spawn zone (y <= 2), trigger Crossword Rescue on 1st top-out and Game Over on 2nd top-out when help is not possible or did not help.
+        if (paceMode == PaceMode.ARCADE) {
+            updateTowerWarningStateAfterBoardChange(isNewTurn = true)
+            if (highTower && hasClosedSlot && !wasHelpPiece) {
+                spawnPiece(forceNoProgressHelp = true)
+                return
+            }
+            if (criticalTower) {
                 handleArcadeTopReached()
+                return
             }
+            spawnPiece()
+            return
+        }
+
+        // Section 2 order on every piece lock (Puzzle / Slow family modes):
+        // a) High tower (y <= 4) AND there is a closed open slot (and help hasn't just failed):
+        //    NoProgressHelp triggers immediately without waiting for 3 moves!
+        if (highTower && hasClosedSlot && !wasHelpPiece) {
+            isTowerWarningActive = false
+            lastTowerWarningMessage = null
+            spawnPiece(forceNoProgressHelp = true)
+            return
+        }
+
+        // b) High tower (y <= 4) AND no closed open slots:
+        //    Show yellow warning banner while tower is high (at most once per turn), do not block move.
+        updateTowerWarningStateAfterBoardChange(isNewTurn = true)
+
+        // c) Critical tower (y <= 2) AND help is impossible (!hasClosedSlot) or already failed (wasHelpPiece):
+        if (criticalTower && (!hasClosedSlot || wasHelpPiece)) {
+            protectionTriggeredInCurrentLock = true
+            // Instantiate incoming falling piece so protection preserves it into Pocket or Queue
+            activePiece = createNextPieceFromQueue()
+            softClearTopRowsForFamily(alreadySavedUndo = true)
         } else {
             spawnPiece()
         }
@@ -1406,10 +2289,16 @@ class GameEngine(
                 else -> 1200 * comboCount
             }
             val hasOpenSlot = stencilSlots.any { slot ->
-                isValidPoint(slot.x, slot.y) && board[slot.y][slot.x] == null
+                isStencilSlotOpen(slot)
             }
-            if (stencilSlots.isEmpty() || !hasOpenSlot) {
+            if (stencilSlots.isEmpty()) {
                 placeCrosswordStencilOnBoard()
+            } else if (!hasOpenSlot) {
+                if (!checkStencilCompletion()) {
+                    placeCrosswordStencilOnBoard()
+                }
+            } else {
+                checkStencilCompletion()
             }
         }
     }
@@ -1789,8 +2678,32 @@ class GameEngine(
         arcadeRescueUsed = false
         lastEarnedBonus = 0
         lastGiftWordPointsAwarded = 0
+        lastWrongSlotLetterWarning = false
+        lastWrongSlotLetterMessage = null
+        movesWithoutStencilProgress = 0
+        helpTargetSlot = null
+        isHelpPieceActive = false
+        helpPieceTargetLetterIndex = -1
+        lastHelpTriggered = false
+        lastHelpTargetChar = null
+        lastHelpMessage = null
+        lastRemovedBlocksCount = 0
+        lastPathClearedMessage = null
+        lastRemovedCellsForFade.clear()
+        isTowerWarningActive = false
+        towerWarningShownThisTurn = false
+        lastTowerWarningMessage = null
+        towerProtectionTriggerCount = 0
+        lastSafetyClearTriggered = false
+        lastProtectionRemovedBlocksCount = 0
+        lastProtectionMessage = null
+        lastProtectionPieceToHold = false
+        lastProtectionPieceToQueue = false
+        lastProtectionPieceMessage = null
+        protectionTriggeredInCurrentLock = false
         heldPieceShapeType = null
         heldPieceLetters = null
+        nextPieceLetters = emptyList()
         canHoldThisTurn = true
         undoStack.clear()
         mode = GameMode.TETRIS
@@ -1835,6 +2748,17 @@ object GameStateSerializer {
         root.put("stencilStartCol", engine.stencilStartCol)
         root.put("questWord", engine.questWordDefinition?.word ?: "")
         root.put("secondaryQuestWord", engine.secondaryQuestWordDefinition?.word ?: "")
+        root.put("movesWithoutStencilProgress", engine.movesWithoutStencilProgress)
+        root.put("helpTargetSlotX", engine.helpTargetSlot?.x ?: -1)
+        root.put("helpTargetSlotY", engine.helpTargetSlot?.y ?: -1)
+        root.put("isHelpPieceActive", engine.isHelpPieceActive)
+        root.put("helpPieceTargetLetterIndex", engine.helpPieceTargetLetterIndex)
+        root.put("isTowerWarningActive", engine.isTowerWarningActive)
+        root.put("towerProtectionTriggerCount", engine.towerProtectionTriggerCount)
+
+        val nextLettersArr = JSONArray()
+        engine.nextPieceLetters.forEach { nextLettersArr.put(it.toString()) }
+        root.put("nextPieceLetters", nextLettersArr)
 
         val heldLettersArr = JSONArray()
         engine.heldPieceLetters?.forEach { heldLettersArr.put(it.toString()) }
@@ -1933,6 +2857,20 @@ object GameStateSerializer {
             engine.canHoldThisTurn = root.optBoolean("canHoldThisTurn", true)
             engine.stencilRow = root.optInt("stencilRow", engine.rows - 1)
             engine.stencilStartCol = root.optInt("stencilStartCol", 2)
+            engine.movesWithoutStencilProgress = root.optInt("movesWithoutStencilProgress", 0)
+            val savedHelpX = root.optInt("helpTargetSlotX", -1)
+            val savedHelpY = root.optInt("helpTargetSlotY", -1)
+            engine.helpTargetSlot = if (savedHelpX in 0 until engine.cols && savedHelpY in 0 until engine.rows) {
+                GridPoint(savedHelpX, savedHelpY)
+            } else {
+                null
+            }
+            engine.isHelpPieceActive = root.optBoolean("isHelpPieceActive", false)
+            engine.helpPieceTargetLetterIndex = root.optInt("helpPieceTargetLetterIndex", -1)
+            engine.isTowerWarningActive = root.optBoolean("isTowerWarningActive", false)
+            engine.towerProtectionTriggerCount = root.optInt("towerProtectionTriggerCount", 0)
+            engine.towerWarningShownThisTurn = false
+            engine.lastTowerWarningMessage = if (engine.isTowerWarningActive) engine.formatTowerHighWarningMessage() else null
 
             engine.usedGiftWordsThisGame.clear()
             val usedGiftsArr = root.optJSONArray("usedGiftWordsThisGame")
@@ -1941,6 +2879,15 @@ object GameStateSerializer {
                     val w = usedGiftsArr.optString(i)
                     if (w.isNotBlank()) engine.usedGiftWordsThisGame.add(w)
                 }
+            }
+
+            val nextLettersJson = root.optJSONArray("nextPieceLetters")
+            if (nextLettersJson != null && nextLettersJson.length() > 0) {
+                engine.nextPieceLetters = (0 until nextLettersJson.length()).map {
+                    nextLettersJson.optString(it, "A").firstOrNull() ?: 'A'
+                }
+            } else {
+                engine.nextPieceLetters = emptyList()
             }
 
             val heldShape = root.optInt("heldPieceShapeType", -1)
@@ -2073,9 +3020,95 @@ object GameStateSerializer {
             } else {
                 engine.activePiece = null
             }
+            if (engine.mode == GameMode.TETRIS && engine.stencilSlots.isNotEmpty()) {
+                engine.checkStencilCompletion()
+                engine.refreshNextPiecePreview()
+            }
             true
         } catch (e: Throwable) {
+            if (e.message?.contains("not mocked") == true) {
+                return deserializeFallbackWithoutOrgJson(json, engine)
+            }
             e.printStackTrace()
+            false
+        }
+    }
+
+    /**
+     * Plain-JVM fallback used when running local JUnit tests where Android's stub org.json.JSONObject throws "not mocked".
+     * Uses identical field names and default values as the primary JSONObject deserializer.
+     */
+    private fun deserializeFallbackWithoutOrgJson(json: String, engine: GameEngine): Boolean {
+        return try {
+            fun extractInt(key: String, default: Int): Int {
+                val m = Regex(""""$key"\s*:\s*(-?\d+)""").find(json)
+                return m?.groupValues?.get(1)?.toIntOrNull() ?: default
+            }
+            fun extractBool(key: String, default: Boolean): Boolean {
+                val m = Regex(""""$key"\s*:\s*(true|false)""").find(json)
+                return m?.groupValues?.get(1)?.toBooleanStrictOrNull() ?: default
+            }
+            fun extractStr(key: String, default: String): String {
+                val m = Regex(""""$key"\s*:\s*"([^"]*)"""").find(json)
+                return m?.groupValues?.get(1) ?: default
+            }
+
+            engine.undoStack.clear()
+            engine.score = extractInt("score", 0)
+            engine.comboCount = extractInt("comboCount", 0)
+            engine.wordsClearedCount = extractInt("wordsClearedCount", 0)
+            engine.freeHintCharges = extractInt("freeHintCharges", 3)
+            engine.usedMagnetOnCurrentStencil = extractBool("usedMagnetOnCurrentStencil", false)
+            engine.isHorizontalCrossSolved = extractBool("isHorizontalCrossSolved", false)
+            engine.isVerticalCrossSolved = extractBool("isVerticalCrossSolved", false)
+            engine.arcadeRescueUsed = extractBool("arcadeRescueUsed", false)
+            engine.isRussian = extractBool("isRussian", true)
+            val modeName = extractStr("mode", GameMode.TETRIS.name)
+            engine.mode = runCatching { GameMode.valueOf(modeName) }.getOrDefault(GameMode.TETRIS)
+            val paceName = extractStr("paceMode", PaceMode.PUZZLE_STEP.name)
+            engine.paceMode = runCatching { PaceMode.valueOf(paceName) }.getOrDefault(PaceMode.PUZZLE_STEP)
+            val themeName = extractStr("selectedTheme", WordTheme.ALL.name)
+            engine.selectedTheme = runCatching { WordTheme.valueOf(themeName) }.getOrDefault(WordTheme.ALL)
+            engine.isSingleTileMode = extractBool("isSingleTileMode", false)
+            engine.isLargeFontMode = extractBool("isLargeFontMode", true)
+            engine.isPaperTheme = extractBool("isPaperTheme", true)
+            engine.isCrossedStencilMode = extractBool("isCrossedStencilMode", false)
+            engine.isDailyWordActive = extractBool("isDailyWordActive", false)
+            engine.stencilRow = extractInt("stencilRow", engine.rows - 1)
+            engine.stencilStartCol = extractInt("stencilStartCol", 2)
+            engine.movesWithoutStencilProgress = extractInt("movesWithoutStencilProgress", 0)
+            val savedHelpX = extractInt("helpTargetSlotX", -1)
+            val savedHelpY = extractInt("helpTargetSlotY", -1)
+            engine.helpTargetSlot = if (savedHelpX in 0 until engine.cols && savedHelpY in 0 until engine.rows) {
+                GridPoint(savedHelpX, savedHelpY)
+            } else {
+                null
+            }
+            engine.isHelpPieceActive = extractBool("isHelpPieceActive", false)
+            engine.helpPieceTargetLetterIndex = extractInt("helpPieceTargetLetterIndex", -1)
+            engine.isTowerWarningActive = extractBool("isTowerWarningActive", false)
+            engine.towerProtectionTriggerCount = extractInt("towerProtectionTriggerCount", 0)
+            engine.towerWarningShownThisTurn = false
+            engine.lastTowerWarningMessage = if (engine.isTowerWarningActive) engine.formatTowerHighWarningMessage() else null
+
+            val savedQuestWord = extractStr("questWord", "")
+            if (savedQuestWord.isNotBlank()) {
+                engine.questWordDefinition = Dictionary.findFirstMatchingDefinition(savedQuestWord, engine.isRussian)
+            }
+            if (engine.questWordDefinition == null) {
+                engine.generateNewTargetWords()
+            }
+            for (r in 0 until engine.rows) {
+                for (c in 0 until engine.cols) {
+                    engine.board[r][c] = null
+                }
+            }
+            engine.placeCrosswordStencilOnBoard()
+            if (engine.mode == GameMode.TETRIS) {
+                engine.spawnPiece()
+            }
+            true
+        } catch (e: Throwable) {
             false
         }
     }

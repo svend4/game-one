@@ -1,6 +1,7 @@
 package com.example.game
 
 import android.app.Application
+import android.content.res.Configuration
 import android.speech.tts.TextToSpeech
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -8,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.R
 import com.example.data.database.CustomFamilyWordEntity
 import com.example.data.database.GameDatabase
 import com.example.data.database.GameRepository
@@ -54,8 +56,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     var isRussian by mutableStateOf(true)
     var activePiece by mutableStateOf<ActivePiece?>(null)
+    var ghostPiecePoints by mutableStateOf<List<GridPoint>>(emptyList())
     var nextPieceShapeType by mutableIntStateOf(0)
+    var nextPieceLetters by mutableStateOf<List<Char>>(emptyList())
     var heldPieceShapeType by mutableStateOf<Int?>(null)
+    var heldPieceLetters by mutableStateOf<List<Char>?>(null)
     var canHoldThisTurn by mutableStateOf(true)
     var questWord by mutableStateOf<WordDefinition?>(null)
     var secondaryQuestWord by mutableStateOf<WordDefinition?>(null)
@@ -65,6 +70,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var giftLetters = mutableListOf<Char>()
     var crosswordClues = mutableListOf<CrosswordClue>()
     var boardStateTick by mutableIntStateOf(0) // incremented to force recompose on array updates
+
+    // NoProgressHelp ("Помощь") & fade-out observable states
+    var movesWithoutStencilProgress by mutableIntStateOf(0)
+    var helpTargetSlot by mutableStateOf<GridPoint?>(null)
+    var pulsingHelpSlot by mutableStateOf<GridPoint?>(null)
+    var isHelpPieceActive by mutableStateOf(false)
+    var helpPieceTargetLetterIndex by mutableIntStateOf(-1)
+    var fadingRemovedCells by mutableStateOf<List<FadingBoardCell>>(emptyList())
+    var isTowerWarningActive by mutableStateOf(false)
+    var towerWarningText by mutableStateOf("")
+    var towerProtectionTriggerCount by mutableIntStateOf(0)
+    private var pulseJob: Job? = null
+    private var fadeJob: Job? = null
 
     // Crossword Stencil Debug Bar (Temporary for letter matching inspection)
     var showStencilDebugBar by mutableStateOf(true)
@@ -108,6 +126,32 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 if (status == TextToSpeech.SUCCESS) {
                     isTtsReady = true
                     tts?.setSpeechRate(0.92f)
+                }
+            }
+        }
+    }
+
+    private fun getLocalizedString(resId: Int, vararg formatArgs: Any): String {
+        return runCatching {
+            val app = getApplication<Application>()
+            val locale = Locale.forLanguageTag(if (engine.isRussian) "ru" else "en")
+            val config = Configuration(app.resources.configuration)
+            config.setLocale(locale)
+            val localizedContext = app.createConfigurationContext(config)
+            localizedContext.getString(resId, *formatArgs)
+        }.getOrElse { "" }
+    }
+
+    private fun speakAloudIfReady(text: String) {
+        if (text.isBlank()) return
+        runCatching {
+            val engineTts = tts
+            if (isTtsReady && engineTts != null) {
+                val locale = if (isRussian) Locale.forLanguageTag("ru-RU") else Locale.US
+                val langStatus = engineTts.setLanguage(locale)
+                if (langStatus != TextToSpeech.LANG_MISSING_DATA && langStatus != TextToSpeech.LANG_NOT_SUPPORTED) {
+                    engineTts.setSpeechRate(0.92f)
+                    engineTts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tetricross_tts")
                 }
             }
         }
@@ -194,15 +238,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         canUndo = engine.undoStack.isNotEmpty()
         isRussian = engine.isRussian
         activePiece = engine.activePiece
+        ghostPiecePoints = engine.getGhostPiecePoints()
         nextPieceShapeType = engine.nextPieceShapeType
+        nextPieceLetters = engine.nextPieceLetters.toList()
         heldPieceShapeType = engine.heldPieceShapeType
+        heldPieceLetters = engine.heldPieceLetters?.toList()
         canHoldThisTurn = engine.canHoldThisTurn
         questWord = engine.questWordDefinition
         secondaryQuestWord = engine.secondaryQuestWordDefinition
         stencilSlots = engine.stencilSlots.toList()
+        stencilDebugSlots = engine.getStencilDebugSlots()
         targetWords = engine.levelTargetWords.toMutableList()
         giftLetters = engine.giftLettersQueue.toMutableList()
         crosswordClues = engine.crosswordClues.toMutableList()
+        movesWithoutStencilProgress = engine.movesWithoutStencilProgress
+        helpTargetSlot = engine.helpTargetSlot
+        isHelpPieceActive = engine.isHelpPieceActive
+        helpPieceTargetLetterIndex = engine.helpPieceTargetLetterIndex
+        isTowerWarningActive = engine.isTowerWarningActive
+        towerProtectionTriggerCount = engine.towerProtectionTriggerCount
+        towerWarningText = if (engine.isTowerWarningActive) {
+            getLocalizedString(R.string.warning_tower_high).ifBlank { engine.formatTowerHighWarningMessage() }
+        } else {
+            ""
+        }
+
+        if (!engine.isHelpPieceActive && pulsingHelpSlot != null && !engine.lastHelpTriggered) {
+            pulsingHelpSlot = null
+        }
+
+        if (engine.lastRemovedCellsForFade.isNotEmpty()) {
+            fadingRemovedCells = engine.lastRemovedCellsForFade.toList()
+            engine.lastRemovedCellsForFade.clear()
+            fadeJob?.cancel()
+            fadeJob = viewModelScope.launch {
+                delay(650L)
+                fadingRemovedCells = emptyList()
+            }
+        }
 
         // Persist any newly unlocked words into the Family Encyclopedia Album
         if (engine.lastUnlockedWords.isNotEmpty()) {
@@ -218,6 +291,51 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     repository.insertUnlockedWord(w)
                 }
             }
+        }
+
+        if (engine.lastWrongSlotLetterWarning) {
+            val wrongMsg = getLocalizedString(R.string.wrong_letter_in_slot_warning)
+                .ifBlank { engine.formatWrongSlotLetterMessage() }
+            showToast(wrongMsg)
+            engine.lastWrongSlotLetterWarning = false
+            engine.lastWrongSlotLetterMessage = null
+        }
+
+        if (engine.lastHelpTriggered) {
+            val helpChar = engine.lastHelpTargetChar ?: '?'
+            val removedCount = engine.lastRemovedBlocksCount
+            val helpRes = getLocalizedString(R.string.no_progress_help_message, helpChar.toString())
+                .ifBlank { engine.formatNoProgressHelpMessage(helpChar, 0) }
+            val fullHelpMsg = if (removedCount > 0) {
+                val clearedRes = getLocalizedString(R.string.path_cleared_blocks_removed, removedCount)
+                    .ifBlank { engine.formatPathClearedBlocksRemovedMessage(removedCount) }
+                "$helpRes. $clearedRes"
+            } else {
+                helpRes
+            }
+            showToast(fullHelpMsg)
+            speakAloudIfReady(fullHelpMsg)
+
+            val targetCoord = engine.helpTargetSlot
+            pulsingHelpSlot = targetCoord
+            pulseJob?.cancel()
+            pulseJob = viewModelScope.launch {
+                delay(2000L)
+                pulsingHelpSlot = null
+            }
+
+            engine.lastHelpTriggered = false
+            engine.lastHelpTargetChar = null
+            engine.lastHelpMessage = null
+            engine.lastRemovedBlocksCount = 0
+            engine.lastPathClearedMessage = null
+        } else if (engine.lastRemovedBlocksCount > 0) {
+            val removedCount = engine.lastRemovedBlocksCount
+            val clearedMsg = getLocalizedString(R.string.path_cleared_blocks_removed, removedCount)
+                .ifBlank { engine.formatPathClearedBlocksRemovedMessage(removedCount) }
+            showToast(clearedMsg)
+            engine.lastRemovedBlocksCount = 0
+            engine.lastPathClearedMessage = null
         }
 
         engine.lastResonanceWord?.let { resonated ->
@@ -240,11 +358,32 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (engine.lastSafetyClearTriggered) {
-            showToast(
-                if (isRussian) "🧹 Мягкая защита: верхние ряды бережно расчищены, игра продолжается!"
-                else "🧹 Gentle Safety Net: top rows cleared so you can keep playing calmly!"
-            )
+            val removedCount = engine.lastProtectionRemovedBlocksCount
+            val pieceMsg = when {
+                engine.lastProtectionPieceToHold ->
+                    getLocalizedString(R.string.protection_piece_to_hold)
+                        .ifBlank { engine.formatProtectionPieceToHoldMessage() }
+                engine.lastProtectionPieceToQueue ->
+                    getLocalizedString(R.string.protection_piece_to_queue)
+                        .ifBlank { engine.formatProtectionPieceToQueueMessage() }
+                else -> ""
+            }
+            val removedMsg = if (removedCount > 0) {
+                getLocalizedString(R.string.protection_blocks_removed, removedCount)
+                    .ifBlank { engine.formatProtectionBlocksRemovedMessage(removedCount) }
+            } else {
+                ""
+            }
+            val combinedMsg = listOf(removedMsg, pieceMsg).filter { it.isNotBlank() }.joinToString(" • ")
+            if (combinedMsg.isNotBlank()) {
+                showToast(combinedMsg)
+            }
             engine.lastSafetyClearTriggered = false
+            engine.lastProtectionRemovedBlocksCount = 0
+            engine.lastProtectionMessage = null
+            engine.lastProtectionPieceToHold = false
+            engine.lastProtectionPieceToQueue = false
+            engine.lastProtectionPieceMessage = null
         }
 
         boardStateTick++

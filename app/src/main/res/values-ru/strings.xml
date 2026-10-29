@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">TetriCross</string>
+    <string name="no_progress_help_message">Помощь: буква «%1$s» открывает путь к лунке</string>
+    <string name="path_cleared_blocks_removed">Путь к лунке освобождён, убрано блоков: %1$d</string>
+    <string name="wrong_letter_in_slot_warning">Эта буква сюда не подходит</string>
+    <string name="warning_tower_high">Башня близко к верху. Соберите слово или отмените ход</string>
+    <string name="protection_blocks_removed">Освобождён верх поля: убрано блоков — %1$d</string>
+    <string name="protection_piece_to_hold">Фигура отложена в карман</string>
+    <string name="protection_piece_to_queue">Фигура возвращена в очередь</string>
+</resources>

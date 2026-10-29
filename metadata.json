@@ -1,6 +1,6 @@
 {
   "name": "TetriCross",
-  "description": "Half Tetris, half crossword puzzle game! When blocks stack up, clear them by guessing words or spending points. Earn points by guessing, placing words, or entering custom secret words.",
+  "description": "Half Tetris, half crossword puzzle game! Words clear automatically when all stencil slots are filled (or by typing the answer), remaining blocks shift aside to keep open slots reachable, gentle help opens blocked slots after 3 moves or when the tower is high, and critical tower protection relocates blocks or removes at most one top row while preserving the active piece.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

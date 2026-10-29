@@ -198,6 +198,16 @@ class ExampleUnitTest {
             letters = listOf('Б')
         )
         engine.lockPiece()
+        if (engine.mode == GameMode.TETRIS && engine.isHelpPieceActive) {
+            engine.activePiece = com.example.game.ActivePiece(
+                shapeType = com.example.game.TetrominoShapes.SINGLE_TILE_SHAPE,
+                x = 4,
+                y = 1,
+                rotation = 0,
+                letters = listOf('Б')
+            )
+            engine.lockPiece()
+        }
 
         // 1st top-out in Arcade enters CROSSWORD rescue mode
         assertEquals(GameMode.CROSSWORD, engine.mode)
@@ -214,6 +224,16 @@ class ExampleUnitTest {
             letters = listOf('В')
         )
         engine.lockPiece()
+        if (engine.mode == GameMode.TETRIS && engine.isHelpPieceActive) {
+            engine.activePiece = com.example.game.ActivePiece(
+                shapeType = com.example.game.TetrominoShapes.SINGLE_TILE_SHAPE,
+                x = 3,
+                y = 1,
+                rotation = 0,
+                letters = listOf('В')
+            )
+            engine.lockPiece()
+        }
 
         assertEquals(GameMode.GAME_OVER, engine.mode)
     }
@@ -422,5 +442,155 @@ class ExampleUnitTest {
         // Clean up custom word
         assertTrue(Dictionary.removeCustomFamilyWord("БАБУШКА"))
     }
+
+    @Test
+    fun stencilGora_slotRFilledByPiece_clearsStencilAndSpawnsNext() {
+        val engine = GameEngine(cols = 10, rows = 15, isRussian = true)
+        val goraDef = Dictionary.findFirstMatchingDefinition("ГОРА", isRussian = true)!!
+        engine.startSpecificWordOnBoard(goraDef)
+
+        // Ensure specifically the 'Р' slot is the single open slot on the bottom row (row 14)
+        val row = engine.stencilRow
+        assertEquals(14, row)
+        val slotR = engine.stencilSlots.first { it.expectedChar == 'Р' }
+        engine.stencilSlots.forEach { slot ->
+            if (slot.x == slotR.x && slot.y == slotR.y) {
+                engine.board[slot.y][slot.x] = null
+            } else {
+                engine.board[slot.y][slot.x] = GameCell(
+                    char = slot.expectedChar,
+                    colorHex = "#5E35B1",
+                    isAnchor = true
+                )
+            }
+        }
+
+        // Drop a 4-block vertical I-piece where the bottom cell (index 3, offset (0, 2)) carries 'Р'
+        engine.activePiece = com.example.game.ActivePiece(
+            shapeType = 0, // Vertical I piece
+            x = slotR.x,
+            y = 1,
+            rotation = 0,
+            letters = listOf('А', 'О', 'Г', 'Р')
+        )
+        engine.hardDrop()
+
+        // Stencil ГОРА must be cleared automatically and the next stencil must be placed on the bottom row
+        assertEquals("Completing ГОРА with a piece must increment wordsClearedCount", 1, engine.wordsClearedCount)
+        assertTrue("ГОРА must be recorded in lastUnlockedWords", engine.lastUnlockedWords.contains("ГОРА"))
+        assertTrue("Next stencil must be spawned on the board", engine.stencilSlots.isNotEmpty())
+        assertEquals("Next stencil must sit on the floor row", 14, engine.stencilRow)
+    }
+
+    @Test
+    fun wrongLetterInOpenSlot_autoUndoesMove_returnsPieceToTop_andAwardsZeroPoints() {
+        val engine = GameEngine(cols = 10, rows = 15, isRussian = true)
+        val goraDef = Dictionary.findFirstMatchingDefinition("ГОРА", isRussian = true)!!
+        engine.startSpecificWordOnBoard(goraDef)
+
+        val openSlot = engine.stencilSlots.single { engine.board[it.y][it.x] == null }
+        val initialScore = engine.score
+        val wrongChar = if (openSlot.expectedChar == 'Ж') 'Ш' else 'Ж'
+
+        engine.activePiece = com.example.game.ActivePiece(
+            shapeType = com.example.game.TetrominoShapes.SINGLE_TILE_SHAPE,
+            x = openSlot.x,
+            y = 1,
+            rotation = 0,
+            letters = listOf(wrongChar)
+        )
+        engine.hardDrop()
+
+        // Move must be automatically undone: slot remains null, score is unchanged, piece is back at y = 1, warning flag is set
+        assertNull("Open stencil slot must remain empty after wrong letter drop", engine.board[openSlot.y][openSlot.x])
+        assertEquals("Score must not increase when wrong letter lands in open slot", initialScore, engine.score)
+        assertTrue("lastWrongSlotLetterWarning must be triggered", engine.lastWrongSlotLetterWarning)
+        assertNotNull("Active piece must be returned to the top", engine.activePiece)
+        assertEquals("Active piece must return to top row y = 1", 1, engine.activePiece?.y)
+        assertEquals("Active piece must retain its letters", listOf(wrongChar), engine.activePiece?.letters)
+    }
+
+    @Test
+    fun pieceRotation_rotatesLettersPhysicallyWithCells_AcrossAllShapes() {
+        val engine = GameEngine(cols = 10, rows = 15, isRussian = true)
+
+        // 1. Vertical I-piece with letters Р-А-Р-С from top to bottom (y = -1, 0, 1, 2)
+        engine.activePiece = com.example.game.ActivePiece(
+            shapeType = 0,
+            x = 5,
+            y = 5,
+            rotation = 0,
+            letters = listOf('Р', 'А', 'Р', 'С')
+        )
+
+        val beforePoints = engine.activePiece!!.getPoints()
+        val topToBottomBefore = beforePoints.indices
+            .sortedBy { beforePoints[it].y }
+            .map { engine.activePiece!!.letters[it] }
+            .joinToString("-")
+        assertEquals("Р-А-Р-С", topToBottomBefore)
+
+        // Rotate twice (180 degrees)
+        assertTrue(engine.rotatePiece())
+        assertTrue(engine.rotatePiece())
+
+        val afterPoints = engine.activePiece!!.getPoints()
+        val topToBottomAfter = afterPoints.indices
+            .sortedBy { afterPoints[it].y }
+            .map { engine.activePiece!!.letters[it] }
+            .joinToString("-")
+        assertEquals("After 2 rotations of vertical I-piece, Р-А-Р-С top-to-bottom must become С-Р-А-Р", "С-Р-А-Р", topToBottomAfter)
+
+        // 2. Verify all 7 shapes (0..6: I, O, T, S, Z, J, L) physically move cells on 180° rotation
+        for (shapeId in 0..6) {
+            val rot0 = com.example.game.TetrominoShapes.getOffsets(shapeId, 0)
+            val rot2 = com.example.game.TetrominoShapes.getOffsets(shapeId, 2)
+            assertFalse("Shape $shapeId must invert letter cell positions after 2 rotations", rot0 == rot2)
+            // For shapes 2..6 (T, S, Z, J, L pivoted at (0,0)), rot(r+1) is (-dy, dx) of rot(r)
+            if (shapeId in 2..6) {
+                for (r in 0..3) {
+                    val cur = com.example.game.TetrominoShapes.getOffsets(shapeId, r)
+                    val nxt = com.example.game.TetrominoShapes.getOffsets(shapeId, (r + 1) % 4)
+                    for (i in cur.indices) {
+                        val (dx, dy) = cur[i]
+                        assertEquals("Shape $shapeId rot $r cell $i must rotate 90° CW to (-dy, dx)", (-dy to dx), nxt[i])
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun deadEndAtOpenSlot_spawnsRescuePieceWithBottomLetterAndOpenPathAfterThreeMoves() {
+        val engine = GameEngine(cols = 10, rows = 15, isRussian = true)
+        val goraDef = Dictionary.findFirstMatchingDefinition("ГОРА", isRussian = true)!!
+        engine.startSpecificWordOnBoard(goraDef)
+
+        val openSlot = engine.stencilSlots.single { engine.board[it.y][it.x] == null }
+        // Block the vertical path above openSlot with a non-anchor block at row 12
+        engine.board[12][openSlot.x] = GameCell('Щ', "#4DD0E1", isAnchor = false)
+
+        // Simulate 3 moves without progress on side column x = 0
+        repeat(3) {
+            engine.activePiece = com.example.game.ActivePiece(
+                shapeType = com.example.game.TetrominoShapes.SINGLE_TILE_SHAPE,
+                x = 0,
+                y = 10,
+                rotation = 0,
+                letters = listOf('Щ')
+            )
+            engine.lockPiece()
+        }
+
+        // After the 3rd move without progress, the newly spawned piece must have an open path to openSlot
+        // and carry openSlot.expectedChar on its bottom-most cell!
+        assertNull("Blocking cell above open slot must be cleared after 3 moves without progress", engine.board[12][openSlot.x])
+        val rescuePiece = engine.activePiece!!
+        assertTrue(
+            "Rescue piece after 3 stagnant moves must be able to close the open slot",
+            engine.canPieceCloseOpenSlot(rescuePiece, openSlot)
+        )
+    }
 }
+
 

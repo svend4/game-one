@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">TetriCross</string>
+    <string name="no_progress_help_message">Help: the letter «%1$s» opens the way to the gap</string>
+    <string name="path_cleared_blocks_removed">Path to the gap cleared, blocks removed: %1$d</string>
+    <string name="wrong_letter_in_slot_warning">This letter doesn\'t fit here</string>
+    <string name="warning_tower_high">The tower is close to the top. Complete the word or undo the move</string>
+    <string name="protection_blocks_removed">Top of the board cleared: blocks removed — %1$d</string>
+    <string name="protection_piece_to_hold">The piece was moved to the pocket</string>
+    <string name="protection_piece_to_queue">The piece was returned to the queue</string>
+</resources>
