@@ -215,25 +215,25 @@ class ExampleUnitTest {
 
         // 2nd top-out in Arcade transitions to GAME_OVER
         engine.mode = GameMode.TETRIS
-        engine.board[1][5] = GameCell('А', "#4DD0E1")
+        engine.isHelpPieceActive = false
+        for (slot in engine.getOpenStencilSlotsInReadingOrder()) {
+            for (r in 0 until slot.y) {
+                if (engine.board[r][slot.x]?.isAnchor == false) {
+                    engine.board[r][slot.x] = null
+                }
+            }
+        }
+        val openSlotCols = engine.getOpenStencilSlotsInReadingOrder().map { it.x }.toSet()
+        val targetCol = (0 until engine.cols).first { it !in openSlotCols }
+        assertTrue(engine.getClosedOpenStencilSlotsInReadingOrder().isEmpty())
         engine.activePiece = com.example.game.ActivePiece(
             shapeType = com.example.game.TetrominoShapes.SINGLE_TILE_SHAPE,
-            x = 3,
+            x = targetCol,
             y = 1,
             rotation = 0,
             letters = listOf('В')
         )
         engine.lockPiece()
-        if (engine.mode == GameMode.TETRIS && engine.isHelpPieceActive) {
-            engine.activePiece = com.example.game.ActivePiece(
-                shapeType = com.example.game.TetrominoShapes.SINGLE_TILE_SHAPE,
-                x = 3,
-                y = 1,
-                rotation = 0,
-                letters = listOf('В')
-            )
-            engine.lockPiece()
-        }
 
         assertEquals(GameMode.GAME_OVER, engine.mode)
     }

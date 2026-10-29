@@ -997,11 +997,14 @@ class StencilRulesTest {
         assertEquals("First critical top-out in Arcade mode must trigger CROSSWORD rescue", GameMode.CROSSWORD, engine.mode)
         assertTrue("arcadeRescueUsed must be true after first critical top-out", engine.arcadeRescueUsed)
 
-        // 3. Second critical top-out in Arcade mode -> if openSlot became closed by Crossword Rescue board words,
+        // 3. Second critical top-out in Arcade mode with an explicitly closed open slot ->
         //    help triggers first without deleting blocks, and when the help piece does not fill the slot at y <= 2,
         //    it transitions to GAME_OVER without deleting blocks
         engine.mode = GameMode.TETRIS
         engine.isHelpPieceActive = false
+        engine.board[openSlot.y][openSlot.x] = null
+        engine.board[12][openSlot.x] = GameCell(char = 'С', colorHex = "#81C784", isAnchor = false)
+        assertTrue(engine.isStencilSlotClosed(openSlot))
         val blocksBeforeSecondTopOut = (0 until engine.rows).sumOf { r ->
             (0 until engine.cols).count { c -> engine.board[r][c] != null }
         }
@@ -1014,30 +1017,30 @@ class StencilRulesTest {
         )
         engine.lockPiece()
 
-        if (engine.mode == GameMode.TETRIS && engine.isHelpPieceActive) {
-            val blocksAfterHelpOnSecondTopOut = (0 until engine.rows).sumOf { r ->
-                (0 until engine.cols).count { c -> engine.board[r][c] != null }
-            }
-            assertEquals(0, engine.towerProtectionTriggerCount)
-            assertEquals(0, engine.lastProtectionRemovedBlocksCount)
-            assertEquals(blocksBeforeSecondTopOut + 1, blocksAfterHelpOnSecondTopOut)
-
-            engine.activePiece = ActivePiece(
-                shapeType = TetrominoShapes.SINGLE_TILE_SHAPE,
-                x = otherCol,
-                y = 2,
-                rotation = 0,
-                letters = listOf('П')
-            )
-            engine.lockPiece()
+        val blocksAfterHelpOnSecondTopOut = (0 until engine.rows).sumOf { r ->
+            (0 until engine.cols).count { c -> engine.board[r][c] != null }
         }
+        assertTrue(engine.isHelpPieceActive)
+        assertEquals(GameMode.TETRIS, engine.mode)
+        assertEquals(0, engine.towerProtectionTriggerCount)
+        assertEquals(0, engine.lastProtectionRemovedBlocksCount)
+        assertEquals(blocksBeforeSecondTopOut + 1, blocksAfterHelpOnSecondTopOut)
+
+        engine.activePiece = ActivePiece(
+            shapeType = TetrominoShapes.SINGLE_TILE_SHAPE,
+            x = otherCol,
+            y = 2,
+            rotation = 0,
+            letters = listOf('П')
+        )
+        engine.lockPiece()
 
         val blocksAfterSecondTopOut = (0 until engine.rows).sumOf { r ->
             (0 until engine.cols).count { c -> engine.board[r][c] != null }
         }
         assertEquals(GameMode.GAME_OVER, engine.mode)
         assertEquals(0, engine.towerProtectionTriggerCount)
-        assertTrue(blocksAfterSecondTopOut >= blocksBeforeSecondTopOut + 1)
+        assertEquals(blocksBeforeSecondTopOut + 2, blocksAfterSecondTopOut)
     }
 
     /**
