@@ -66,6 +66,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var crosswordClues = mutableListOf<CrosswordClue>()
     var boardStateTick by mutableIntStateOf(0) // incremented to force recompose on array updates
 
+    // Crossword Stencil Debug Bar (Temporary for letter matching inspection)
+    var showStencilDebugBar by mutableStateOf(true)
+    var stencilDebugSlots by mutableStateOf<List<StencilDebugSlot>>(emptyList())
+
+    fun toggleStencilDebugBar() {
+        showStencilDebugBar = !showStencilDebugBar
+    }
+
     // Explicit User Pause State & Active Screen tracking (prevents background loop in Menu!)
     var isUserPaused by mutableStateOf(false)
     var isGameScreenActive by mutableStateOf(false)

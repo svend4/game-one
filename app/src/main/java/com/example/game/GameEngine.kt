@@ -1,9 +1,19 @@
 package com.example.game
 
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import kotlin.random.Random
+
+data class StencilDebugSlot(
+    val index: Int,
+    val x: Int,
+    val y: Int,
+    val expectedChar: Char,
+    val actualChar: Char?,
+    val isMatched: Boolean
+)
 
 data class GridPoint(val x: Int, val y: Int)
 
@@ -678,27 +688,95 @@ class GameEngine(
         return true
     }
 
+    private var isCheckingStencilCompletion = false
+
+    /**
+     * Attempts to restore questWordDefinition if it was null, using current stencil slots or riddle clues.
+     * Logs a warning when restoration occurs.
+     */
+    fun ensureQuestWordDefinitionRestored(): WordDefinition? {
+        val current = questWordDefinition
+        if (current != null) return current
+
+        val hWord = stencilSlots
+            .filter { it.isHorizontal }
+            .sortedBy { it.x }
+            .map { it.expectedChar }
+            .joinToString("")
+
+        val candidate = when {
+            hWord.isNotBlank() -> hWord
+            levelTargetWords.isNotEmpty() -> levelTargetWords.first()
+            crosswordClues.isNotEmpty() -> crosswordClues.first().word
+            else -> ""
+        }
+
+        if (candidate.isNotBlank()) {
+            val def = Dictionary.findFirstMatchingDefinition(candidate, isRussian)
+                ?: WordDefinition(
+                    word = candidate.uppercase(),
+                    definition = crosswordClues.firstOrNull { it.word == candidate }?.clue ?: "Загаданное слово",
+                    category = Dictionary.getCategory(candidate, isRussian),
+                    funFact = Dictionary.getFunFact(candidate, isRussian)
+                )
+            questWordDefinition = def
+            Log.w("TetriCross", "questWordDefinition was null! Restored word '${def.word}' from active stencil slots/riddle")
+            return def
+        }
+
+        Log.w("TetriCross", "checkStencilCompletion: questWordDefinition was null and could not be restored")
+        return null
+    }
+
+    /**
+     * Returns real-time debug information for each stencil slot on the board.
+     */
+    fun getStencilDebugSlots(): List<StencilDebugSlot> {
+        return stencilSlots.mapIndexed { idx, slot ->
+            val cell = if (isValidPoint(slot.x, slot.y)) board[slot.y][slot.x] else null
+            val actual = cell?.char
+            val matched = if (cell == null) {
+                false
+            } else if (cell.char == Dictionary.WILDCARD_CHAR) {
+                true
+            } else {
+                Dictionary.normalizeYo(cell.char.toString()) == Dictionary.normalizeYo(slot.expectedChar.toString())
+            }
+            StencilDebugSlot(
+                index = idx,
+                x = slot.x,
+                y = slot.y,
+                expectedChar = slot.expectedChar,
+                actualChar = actual,
+                isMatched = matched
+            )
+        }
+    }
+
     /**
      * Checks if the active Crossword Stencil on the board has been completed (either by matching letter,
      * wildcard '★', or filling all stencil slots).
+     * If questWordDefinition is null, restores it from the current riddle/stencil and logs a warning.
      * In Crossed Stencil mode ("✚ Крест"), also locks completed horizontal or vertical arms as anchors
      * so partial progress is protected until both intersecting words are finished!
      */
     fun checkStencilCompletion(): Boolean {
+        if (isCheckingStencilCompletion) return false
         if (stencilSlots.isEmpty()) return false
-        val quest = questWordDefinition ?: return false
+        val quest = questWordDefinition ?: ensureQuestWordDefinitionRestored() ?: return false
 
         val hSlots = stencilSlots.filter { it.isHorizontal }
         val vSlots = stencilSlots.filter { !it.isHorizontal }
 
-        val hMatched = hSlots.isNotEmpty() && hSlots.all { slot ->
-            val cell = if (isValidPoint(slot.x, slot.y)) board[slot.y][slot.x] else null
-            cell != null && (cell.char == slot.expectedChar || cell.char == Dictionary.WILDCARD_CHAR)
+        fun isSlotMatched(slot: StencilSlot): Boolean {
+            if (!isValidPoint(slot.x, slot.y)) return false
+            val cell = board[slot.y][slot.x] ?: return false
+            if (cell.char == Dictionary.WILDCARD_CHAR) return true
+            return Dictionary.normalizeYo(cell.char.toString()) == Dictionary.normalizeYo(slot.expectedChar.toString())
         }
-        val vMatched = vSlots.isEmpty() || vSlots.all { slot ->
-            val cell = if (isValidPoint(slot.x, slot.y)) board[slot.y][slot.x] else null
-            cell != null && (cell.char == slot.expectedChar || cell.char == Dictionary.WILDCARD_CHAR)
-        }
+
+        val hMatched = hSlots.isNotEmpty() && hSlots.all { isSlotMatched(it) }
+        val vMatched = vSlots.isEmpty() || vSlots.all { isSlotMatched(it) }
 
         if (hMatched && !isHorizontalCrossSolved) {
             isHorizontalCrossSolved = true
@@ -720,19 +798,24 @@ class GameEngine(
         }
 
         if (hMatched && vMatched) {
-            val vWord = secondaryQuestWordDefinition?.word
-            val displaySolved = if (isCrossedStencilMode && vWord != null) {
-                "${quest.word} ✚ $vWord"
-            } else {
-                quest.word
+            try {
+                isCheckingStencilCompletion = true
+                val vWord = secondaryQuestWordDefinition?.word
+                val displaySolved = if (isCrossedStencilMode && vWord != null) {
+                    "${quest.word} ✚ $vWord"
+                } else {
+                    quest.word
+                }
+                triggerStencilTetrisLineClear(
+                    solvedDisplay = displaySolved,
+                    primaryWord = quest.word,
+                    secondaryWord = vWord,
+                    completedWithMagnet = usedMagnetOnCurrentStencil
+                )
+                return true
+            } finally {
+                isCheckingStencilCompletion = false
             }
-            triggerStencilTetrisLineClear(
-                solvedDisplay = displaySolved,
-                primaryWord = quest.word,
-                secondaryWord = vWord,
-                completedWithMagnet = usedMagnetOnCurrentStencil
-            )
-            return true
         }
         return false
     }
@@ -872,6 +955,7 @@ class GameEngine(
      */
     fun solveActiveStencilByWord(guess: String): Boolean {
         val clean = Dictionary.normalizeYo(guess)
+        ensureQuestWordDefinitionRestored()
         val quest = questWordDefinition ?: return false
         val sec = if (isCrossedStencilMode) secondaryQuestWordDefinition else null
 
@@ -930,12 +1014,27 @@ class GameEngine(
             }
         }
 
-        triggerStencilTetrisLineClear(
-            solvedDisplay = if (sec != null && isCrossedStencilMode) "${quest.word} ✚ ${sec.word}" else quest.word,
-            primaryWord = quest.word,
-            secondaryWord = if (isCrossedStencilMode) sec?.word else null,
-            completedWithMagnet = usedMagnetOnCurrentStencil
-        )
+        // Fill all stencil cells with their expected characters as anchors and check completion
+        for (slot in stencilSlots) {
+            if (isValidPoint(slot.x, slot.y)) {
+                board[slot.y][slot.x] = GameCell(
+                    char = slot.expectedChar,
+                    colorHex = "#00E676",
+                    isWildcard = false,
+                    isAnchor = true
+                )
+            }
+        }
+
+        val completed = checkStencilCompletion()
+        if (!completed) {
+            triggerStencilTetrisLineClear(
+                solvedDisplay = if (sec != null && isCrossedStencilMode) "${quest.word} ✚ ${sec.word}" else quest.word,
+                primaryWord = quest.word,
+                secondaryWord = if (isCrossedStencilMode) sec?.word else null,
+                completedWithMagnet = usedMagnetOnCurrentStencil
+            )
+        }
         return true
     }
 
@@ -1612,6 +1711,10 @@ class GameEngine(
             }
             stencilSlots.clear()
             stencilSlots.addAll(updatedSlots)
+        }
+
+        if (stencilSlots.isNotEmpty()) {
+            checkStencilCompletion()
         }
     }
 
